@@ -110,7 +110,7 @@ async function listReceipts(startDate, endDate) {
 }
 
 async function downloadReceipts() {
-    var startDateStr = '09/16/2023';
+    var startDateStr = '01/01/2000';
     var endDate = new Date();
     var endDateStr = endDate.toLocaleDateString('en-US', {
         year: "numeric",
