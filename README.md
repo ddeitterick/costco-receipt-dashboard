@@ -93,8 +93,7 @@ This project uses code from the [@ankurdave/beancount_import_sources](https://gi
 ## Acknowledgements
 Thanks to the authors and resources that inspired or provided parts of this dashboard and script:
 
-- [Your list here] — add names, projects, or links you'd like to credit.
 - ankurdave - https://github.com/ankurdave/beancount_import_sources/blob/main/download/download_costco_receipts.js
-- u/ikeee for the OG report
-- u/ViKoToMo for the updated version
-- u/webrender for the YouTube video on how to run the Javascript (https://www.youtube.com/watch?v=v0zRaWkQ5lQ)
+- Reddit user u/ikeee for the OG report
+- Reddit user u/ViKoToMo for the updated version
+- Reddit user u/webrender for the YouTube video on how to run the Javascript (https://www.youtube.com/watch?v=v0zRaWkQ5lQ)
