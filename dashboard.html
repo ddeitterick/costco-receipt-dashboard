@@ -281,6 +281,14 @@
         </div>
         <div id="status" class="status">No file loaded yet.</div>
       </div>
+      <div>
+        <div class="uploader">
+          <label for="memberFilter">Filter by Member:</label>
+          <select id="memberFilter" style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 0.9rem;">
+            <option value="">All Members</option>
+          </select>
+        </div>
+      </div>
     </header>
  
     <!-- Summary cards -->
@@ -555,9 +563,44 @@
       return n.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + " gal";
     }
  
+    let currentFilterMember = ""; // global filter state
+    let allReceiptsData = null; // store all data for filtering
+
     function monthsBetween(d1, d2) {
       const msPerMonth = 1000 * 60 * 60 * 24 * 30.4375;
       return Math.abs(d2 - d1) / msPerMonth;
+    }
+
+    function filterItemStatsByMember(itemStats, membershipNumber) {
+      // If no filter, return all stats
+      if (!membershipNumber) return itemStats;
+      
+      // Create filtered copy, only including purchases by this member
+      const filtered = new Map();
+      itemStats.forEach((stat, key) => {
+        const memberPrices = stat.prices.filter(p => p.membershipNumber === membershipNumber);
+        if (memberPrices.length > 0) {
+          // Recalculate stats based on filtered prices
+          let totalSpent = 0;
+          let totalUnits = 0;
+          memberPrices.forEach(p => {
+            totalSpent += p.amount || 0; // use the amount stored on price entry
+            totalUnits += p.unit || 0;   // use the unit stored on price entry
+          });
+          
+          const newStat = {
+            itemNumber: stat.itemNumber,
+            name: stat.name,
+            prices: memberPrices,
+            totalSpent,
+            totalUnits,
+            purchases: totalUnits, // purchases count is total units for this member
+            members: new Set([membershipNumber]),
+          };
+          filtered.set(key, newStat);
+        }
+      });
+      return filtered;
     }
  
     function processReceipts(receipts) {
@@ -751,7 +794,8 @@
                 totalSpent: 0,
                 totalUnits: 0,
                 purchases: 0,
-                prices: [], // {date, price}
+                prices: [], // {date, price, unitPrice, rawUnitPrice, membershipNumber}
+                members: new Set(), // track which members purchased this
               };
               itemStats.set(key, stat);
             }
@@ -759,12 +803,15 @@
             stat.totalSpent += adjustedAmount;
             stat.totalUnits += unit;
             stat.purchases += unit;
+            if (membershipNumber) {
+              stat.members.add(membershipNumber);
+            }
             // Store both the adjusted per-unit price (after discounts) and the raw/unit price
             // reported by the receipt (itemUnitPriceAmount) when available. The price-change
             // renderer will prefer unitPrice for min/max and trend calculations.
             // Also keep the raw reported per-unit price so we can show the
             // non-discounted value when needed.
-            stat.prices.push({ date: trxDate, price: adjustedPerUnitPrice, unitPrice: unitPriceForHistory, rawUnitPrice: rawPerUnitPrice });
+            stat.prices.push({ date: trxDate, price: adjustedPerUnitPrice, unitPrice: unitPriceForHistory, rawUnitPrice: rawPerUnitPrice, membershipNumber, unit, amount: adjustedAmount });
 
             // Keep existing summary metrics based on purchases only
             sumItemAmounts += adjustedAmount;
@@ -1584,18 +1631,58 @@
       const { itemStats, monthlyTotals, yearlyTotals, summary, warehouseStats, returnsStats, gasolineStats, discountedItemStats, memberStats } =
         processReceipts(receipts);
 
-      renderSummary(summary);
-      if (warehouseStats) renderWarehouseBreakdown(warehouseStats);
-      if (returnsStats) renderMostReturned(returnsStats);
-      if (gasolineStats) renderGasoline(gasolineStats);
-  if (discountedItemStats) renderDiscountedItems(discountedItemStats);
-  if (memberStats) renderMemberStats(memberStats);
-      renderMostTotalSpent(itemStats);
-      renderMostPurchased(itemStats);
-      renderMostExpensive(itemStats);
-      renderPriceIncreases(itemStats);
-      renderTimedChart(monthlyTotals, 'monthlyChart');
-      renderTimedChart(yearlyTotals, 'yearlyChart');
+      // Store all data globally for filtering
+      allReceiptsData = {
+        itemStats,
+        monthlyTotals,
+        yearlyTotals,
+        summary,
+        warehouseStats,
+        returnsStats,
+        gasolineStats,
+        discountedItemStats,
+        memberStats,
+      };
+
+      // Populate member filter dropdown
+      const memberFilterSelect = document.getElementById("memberFilter");
+      memberFilterSelect.innerHTML = '<option value="">All Members</option>';
+      Array.from(memberStats.keys()).sort().forEach(memberId => {
+        const option = document.createElement("option");
+        option.value = memberId;
+        option.textContent = memberId;
+        memberFilterSelect.appendChild(option);
+      });
+
+      // Set up member filter change event
+      memberFilterSelect.addEventListener("change", (e) => {
+        currentFilterMember = e.target.value;
+        reRenderWithFilter();
+      });
+
+      // Render initial view
+      reRenderWithFilter();
+    }
+
+    function reRenderWithFilter() {
+      const data = allReceiptsData;
+      const filteredItemStats = filterItemStatsByMember(data.itemStats, currentFilterMember);
+
+      // For now, only filter the item-based cards; other cards show all members
+      renderMostTotalSpent(filteredItemStats);
+      renderMostPurchased(filteredItemStats);
+      renderMostExpensive(filteredItemStats);
+      renderPriceIncreases(filteredItemStats);
+      
+      // These cards don't have member-specific data yet, so render all
+      renderSummary(data.summary);
+      if (data.warehouseStats) renderWarehouseBreakdown(data.warehouseStats);
+      if (data.returnsStats) renderMostReturned(data.returnsStats);
+      if (data.gasolineStats) renderGasoline(data.gasolineStats);
+      if (data.discountedItemStats) renderDiscountedItems(data.discountedItemStats);
+      if (data.memberStats) renderMemberStats(data.memberStats);
+      renderTimedChart(data.monthlyTotals, 'monthlyChart');
+      renderTimedChart(data.yearlyTotals, 'yearlyChart');
     }
  
     // File input handler
