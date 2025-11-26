@@ -893,9 +893,17 @@
             totalReturned += Math.abs(amount);
           }
           
-          // Discounts
+          // Discounts: detect negative amounts with descriptions starting with "/" (discount line items)
           else if (unit < 0 && amount < 0 && String(item.itemDescription01 || "").trim().startsWith("/")) {
-            totalDiscounts += Math.abs(amount);
+            // The discount references the item number in the description
+            // Find the referenced item in this receipt
+            const refItemNum = String(item.itemDescription01 || "").trim().substring(1); // Remove leading "/"
+            const refItem = items.find((it) => String(it.itemNumber) === refItemNum);
+            
+            if (refItem) {
+              // Only count the discount if the referenced item exists
+              totalDiscounts += Math.abs(amount);
+            }
           }
         });
       });
@@ -952,6 +960,47 @@
           filtered.set(key, newStat);
         }
       });
+      return filtered;
+    }
+
+    function filterTimedStatsByMember(timedStats, membershipNumber, allReceipts = null, isYearly = false) {
+      if (!membershipNumber) return timedStats;
+      
+      // If we don't have receipts, we can't recalculate, so return original
+      if (!allReceipts) return timedStats;
+      
+      const filtered = new Map();
+      
+      // Rebuild the timed stats from receipts for just this member
+      allReceipts.forEach(receipt => {
+        if (receipt.membershipNumber !== membershipNumber) return;
+        
+        const items = receipt.itemArray || receipt.items || [];
+        let total = 0;
+        
+        items.forEach(item => {
+          const qty = (item.quantity || 1) * (item.unitQuantity || 1);
+          let price = item.itemUnitPriceAmount || item.unitPrice || item.price || 0;
+          
+          // Apply discount if applicable
+          if (item.memberDiscount && item.memberDiscount > 0) {
+            price = Math.max(0, price - item.memberDiscount);
+          }
+          
+          total += qty * price;
+        });
+        
+        // Determine the key based on whether we want yearly or monthly
+        const dateStr = receipt.transactionDate || "";
+        const key = isYearly ? dateStr.slice(0, 4) : dateStr.slice(0, 7); // YYYY or YYYY-MM
+        
+        // Add to filtered
+        const data = filtered.get(key) || { total: 0, membershipNumbers: new Set() };
+        data.total += total;
+        data.membershipNumbers.add(membershipNumber);
+        filtered.set(key, data);
+      });
+      
       return filtered;
     }
  
@@ -1984,13 +2033,12 @@
  
     let timedCharts = {};
  
-    function renderTimedChart(totals, id, membershipNumber = null) {
-      const ctx = document
-        .getElementById(id)
-        .getContext("2d");
+    function renderTimedChart(totals, id, membershipNumber = null, isYearly = false) {
+      const canvas = document.getElementById(id);
+      const ctx = canvas.getContext("2d");
  
-      // Filter by member if specified
-      const filtered = filterTimedStatsByMember(totals, membershipNumber);
+      // Filter by member if specified - pass allReceiptsData so we can recalculate from receipts
+      const filtered = filterTimedStatsByMember(totals, membershipNumber, allReceiptsData.receipts, isYearly);
 
       const entries = Array.from(filtered.entries()).sort(
         (a, b) => (a[0] < b[0] ? -1 : 1)
@@ -2001,7 +2049,11 @@
  
       if (timedCharts[id]) {
         timedCharts[id].destroy();
+        delete timedCharts[id];
       }
+      
+      // Clear the canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
  
       timedCharts[id] = new Chart(ctx, {
         type: "bar",
@@ -2037,6 +2089,7 @@
 
       // Store all data globally for filtering
       allReceiptsData = {
+        receipts,
         itemStats,
         monthlyTotals,
         yearlyTotals,
@@ -2085,8 +2138,8 @@
       if (data.gasolineStats) renderGasoline(data.gasolineStats, currentFilterMember);
       if (data.discountedItemStats) renderDiscountedItems(data.discountedItemStats, currentFilterMember);
       if (data.memberStats) renderMemberStats(data.memberStats, currentFilterMember);
-      renderTimedChart(data.monthlyTotals, 'monthlyChart', currentFilterMember);
-      renderTimedChart(data.yearlyTotals, 'yearlyChart', currentFilterMember);
+      renderTimedChart(data.monthlyTotals, 'monthlyChart', currentFilterMember, false);
+      renderTimedChart(data.yearlyTotals, 'yearlyChart', currentFilterMember, true);
     }
  
     // File input handler - support multiple files
