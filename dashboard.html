@@ -407,6 +407,24 @@
           </tbody>
         </table>
       </div>
+
+      <div class="card">
+        <h2><span class="icon">🏷️</span>Top Discounted Items</h2>
+        <p class="subtitle">Products purchased with the largest total discounts.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>Times Purchased</th>
+              <th>Total Discount</th>
+              <th>Avg Discount</th>
+            </tr>
+          </thead>
+          <tbody id="discountedItemsBody">
+          </tbody>
+        </table>
+      </div>
     </section>
  
     <section class="grid-2">
@@ -463,26 +481,6 @@
             </tr>
           </thead>
           <tbody id="gasolineBody">
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="grid-2">
-      <div class="card">
-        <h2><span class="icon">🏷️</span>Top Discounted Items</h2>
-        <p class="subtitle">Products purchased with the largest total discounts.</p>
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Item</th>
-              <th>Times Purchased</th>
-              <th>Total Discount</th>
-              <th>Avg Discount</th>
-            </tr>
-          </thead>
-          <tbody id="discountedItemsBody">
           </tbody>
         </table>
       </div>
@@ -1219,7 +1217,14 @@
             signedChange = row.lastPrice - row.firstPrice;
           }
           changeTd.textContent = (signedChange >= 0 ? '+' : '-') + formatMoney(Math.abs(signedChange));
-          tr.appendChild(changeTd);
+            if (signedChange > 0.001) {
+              changeTd.classList.add('trend-up');
+            } else if (signedChange < -0.001) {
+              changeTd.classList.add('trend-down');
+            } else {
+              changeTd.classList.add('trend-none');
+            }
+            tr.appendChild(changeTd);
 
           // Lowest (when)
           const minLabel = row.minDate ? fmt.format(row.minDate) : '';
@@ -1247,7 +1252,14 @@
             signedRate = (row.lastPrice - row.firstPrice) / row.months;
           }
           rateTd.textContent = (signedRate >= 0 ? '+' : '-') + formatMoney(Math.abs(signedRate)) + "/mo";
-          tr.appendChild(rateTd);
+            if (signedRate > 0.001) {
+              rateTd.classList.add('trend-up');
+            } else if (signedRate < -0.001) {
+              rateTd.classList.add('trend-down');
+            } else {
+              rateTd.classList.add('trend-none');
+            }
+            tr.appendChild(rateTd);
 
           const trendTd = document.createElement("td");
           if (row.firstPrice == null || row.lastPrice == null) {
