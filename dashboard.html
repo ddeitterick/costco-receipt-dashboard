@@ -274,6 +274,11 @@
         <div class="sub">Distinct Costco item codes</div>
       </div>
       <div class="summary-card">
+        <div class="label">Unique Warehouses</div>
+        <div class="value" id="uniqueWarehouses">–</div>
+        <div class="sub">Distinct warehouses visited</div>
+      </div>
+      <div class="summary-card">
         <div class="label">Receipts</div>
         <div class="value" id="receiptCount">–</div>
         <div class="sub">Number of shopping trips</div>
@@ -412,6 +417,7 @@
       const itemStats = new Map(); // key -> stats
       const monthlyTotals = new Map(); // "YYYY-MM" -> total
       const yearlyTotals = new Map(); // "YYYY" -> total
+      const warehouses = new Set(); // collect unique warehouse names
       let totalSpent = 0;
       let sumItemAmounts = 0;
       let totalUnits = 0;
@@ -436,6 +442,11 @@
           );
         }
  
+        // Track warehouse names (some inputs use different property names)
+        const whName =
+          receipt.warehouseName || receipt.warehouse || receipt.storeName || receipt.store;
+        if (whName) warehouses.add(String(whName).trim());
+
         const items = Array.isArray(receipt.itemArray)
           ? receipt.itemArray
           : [];
@@ -498,6 +509,8 @@
           totalUnits,
           receiptsCount,
           uniqueItems,
+          uniqueWarehouses: warehouses.size,
+          uniqueWarehousesList: Array.from(warehouses).sort(),
           avgItemPrice,
           avgPerReceipt,
         },
@@ -509,6 +522,11 @@
         summary.totalUnits.toLocaleString();
       document.getElementById("uniqueItems").textContent =
         summary.uniqueItems.toLocaleString();
+      // Unique warehouses
+      const uwEl = document.getElementById("uniqueWarehouses");
+      if (uwEl) {
+        uwEl.textContent = (summary.uniqueWarehouses || 0).toLocaleString();
+      }
       document.getElementById("receiptCount").textContent =
         summary.receiptsCount.toLocaleString();
       document.getElementById("totalSpent").textContent =
