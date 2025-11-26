@@ -177,21 +177,26 @@
  
     th, td {
       padding: 6px 6px;
-      text-align: left;
+      /* Center all columns by default; first column will be overridden to left */
+      text-align: center;
       border-bottom: 1px solid var(--border);
       white-space: nowrap;
     }
  
     th:first-child,
     td:first-child {
-      text-align: right;
+      /* Keep the first column left-aligned (rank / item identifier) */
+      text-align: left;
       width: 1%;
     }
- 
-    th:last-child,
-    td:last-child {
-      text-align: right;
+
+    /* Also left-align the second column (item name) for readability */
+    th:nth-child(2),
+    td:nth-child(2) {
+      text-align: left;
     }
+ 
+    /* Last-column right alignment removed so non-first columns stay centered */
  
     tbody tr:nth-child(even) {
       background: #f9fafb;
