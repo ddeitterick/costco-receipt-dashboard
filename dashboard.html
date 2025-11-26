@@ -277,7 +277,7 @@
       <div>
         <div class="uploader">
           <label for="fileInput">Receipts JSON:</label>
-          <input id="fileInput" type="file" accept="application/json,.json" />
+          <input id="fileInput" type="file" accept="application/json,.json" multiple />
         </div>
         <div id="status" class="status">No file loaded yet.</div>
       </div>
@@ -566,10 +566,361 @@
  
     let currentFilterMember = ""; // global filter state
     let allReceiptsData = null; // store all data for filtering
+    let accumulatedReceipts = []; // accumulate receipts from multiple file uploads
+    
+    // Create a unique key for each receipt to detect duplicates
+    function getReceiptKey(receipt) {
+      const date = receipt.transactionDate || receipt.transactionDateTime || "";
+      const amount = receipt.total || receipt.totalAmount || "";
+      const memberId = receipt.membershipNumber || "";
+      const itemCount = (receipt.itemArray && receipt.itemArray.length) || 0;
+      // Create a composite key that identifies a unique receipt
+      return `${date}|${amount}|${memberId}|${itemCount}`;
+    }
+    
+    // Deduplicate receipts based on transaction date, amount, member, and item count
+    function deduplicateReceipts(newReceipts) {
+      const existingKeys = new Set();
+      accumulatedReceipts.forEach(receipt => {
+        existingKeys.add(getReceiptKey(receipt));
+      });
+      
+      const uniqueNewReceipts = [];
+      newReceipts.forEach(receipt => {
+        const key = getReceiptKey(receipt);
+        if (!existingKeys.has(key)) {
+          uniqueNewReceipts.push(receipt);
+          existingKeys.add(key);
+        }
+      });
+      
+      return uniqueNewReceipts;
+    }
 
     function monthsBetween(d1, d2) {
       const msPerMonth = 1000 * 60 * 60 * 24 * 30.4375;
       return Math.abs(d2 - d1) / msPerMonth;
+    }
+
+    function filterWarehouseStatsByMember(warehouseStats, membershipNumber) {
+      if (!membershipNumber) return warehouseStats;
+      
+      // Need to recalculate warehouse stats for just this member
+      // We'll filter the accumulated receipts to get member-specific warehouse data
+      const filtered = new Map();
+      
+      // Iterate through accumulated receipts to rebuild warehouse stats for this member
+      const memberReceipts = accumulatedReceipts.filter(r => 
+        r.membershipNumber && String(r.membershipNumber) === membershipNumber
+      );
+      
+      memberReceipts.forEach(receipt => {
+        const total = Number(receipt.total) || 0;
+        const whRaw = receipt.warehouseName || receipt.warehouse || receipt.storeName || receipt.store || "";
+        const whNum = receipt.warehouseNumber || receipt.storeNumber || null;
+        let whLabel = (whRaw && String(whRaw).trim().toUpperCase()) || "";
+        if (whLabel && whNum) {
+          whLabel = `${whLabel} (#${whNum})`;
+        } else if (!whLabel && whNum) {
+          whLabel = `#${whNum}`;
+        }
+        if (!whLabel) whLabel = "Unknown";
+        
+        const ws = filtered.get(whLabel) || { total: 0, trips: 0, membershipNumbers: new Set([membershipNumber]) };
+        ws.total += total;
+        ws.trips += 1;
+        filtered.set(whLabel, ws);
+      });
+      
+      return filtered;
+    }
+
+    function filterReturnsStatsByMember(returnsStats, membershipNumber) {
+      if (!membershipNumber) return returnsStats;
+      
+      // Need to recalculate returns stats for just this member
+      const filtered = new Map();
+      
+      // Iterate through accumulated receipts to rebuild returns stats for this member
+      const memberReceipts = accumulatedReceipts.filter(r => 
+        r.membershipNumber && String(r.membershipNumber) === membershipNumber
+      );
+      
+      memberReceipts.forEach(receipt => {
+        if (String(receipt.transactionType) === 'Refund') {
+          const items = Array.isArray(receipt.itemArray) ? receipt.itemArray : [];
+          const trxDate = receipt.transactionDateTime ||
+            (receipt.transactionDate ? receipt.transactionDate + "T00:00:00" : null);
+          const dateObj = trxDate ? new Date(trxDate) : new Date();
+          
+          items.forEach(item => {
+            const unit = Number(item.unit) || 0;
+            const amount = Number(item.amount) || 0;
+            const rawPerUnitPrice = item.itemUnitPriceAmount
+              ? Number(item.itemUnitPriceAmount)
+              : unit !== 0 ? amount / unit : 0;
+            
+            // Returns/refunds: treat rows as returns when transactionType is 'Refund'
+            if (unit < 0 || amount < 0) {
+              const key = item.itemNumber + "|" + (item.itemDescription01 || "").trim();
+              const name = (item.itemDescription01 || "").trim();
+              
+              let r = filtered.get(key);
+              if (!r) {
+                r = {
+                  itemNumber: item.itemNumber,
+                  name,
+                  totalRefund: 0,
+                  returnsCount: 0,
+                  refunds: [],
+                  membershipNumbers: new Set([membershipNumber]),
+                };
+                filtered.set(key, r);
+              }
+              
+              r.totalRefund += amount;
+              r.returnsCount += Math.abs(unit) || 1;
+              r.refunds.push({ date: dateObj, amountPerUnit: rawPerUnitPrice });
+            }
+          });
+        }
+      });
+      
+      return filtered;
+    }
+
+    function filterGasolineStatsByMember(gasolineStats, membershipNumber) {
+      if (!membershipNumber) return gasolineStats;
+      
+      // Need to recalculate gasoline stats for just this member
+      const filtered = new Map();
+      
+      // Iterate through accumulated receipts to rebuild gasoline stats for this member
+      const memberReceipts = accumulatedReceipts.filter(r => 
+        r.membershipNumber && String(r.membershipNumber) === membershipNumber
+      );
+      
+      memberReceipts.forEach(receipt => {
+        const isGasPurchase = receipt.documentType === 'FuelReceipts' || receipt.receiptType === 'Gas Station';
+        if (isGasPurchase) {
+          const total = Number(receipt.total) || 0;
+          const whRaw = receipt.warehouseName || receipt.warehouse || receipt.storeName || receipt.store || "";
+          const whNum = receipt.warehouseNumber || receipt.storeNumber || null;
+          let whLabel = (whRaw && String(whRaw).trim().toUpperCase()) || "";
+          if (whLabel && whNum) {
+            whLabel = `${whLabel} (#${whNum})`;
+          } else if (!whLabel && whNum) {
+            whLabel = `#${whNum}`;
+          }
+          if (!whLabel) whLabel = "Unknown";
+          
+          const stationName = whLabel;
+          const items = Array.isArray(receipt.itemArray) ? receipt.itemArray : [];
+          const stationGallons = items.reduce(
+            (acc, it) => {
+              const hasFuelMarker = it.fuelGradeCode || it.fuelUomCode;
+              return acc + (hasFuelMarker ? (Number(it.fuelUnitQuantity) || 0) : 0);
+            },
+            0
+          );
+          
+          const gs = filtered.get(stationName) || { total: 0, fillUps: 0, totalGallons: 0, membershipNumbers: new Set([membershipNumber]) };
+          gs.total += total;
+          gs.fillUps += 1;
+          gs.totalGallons = (gs.totalGallons || 0) + stationGallons;
+          filtered.set(stationName, gs);
+        }
+      });
+      
+      return filtered;
+    }
+
+    function filterDiscountedItemStatsByMember(discountedItemStats, membershipNumber) {
+      if (!membershipNumber) return discountedItemStats;
+      
+      // Need to recalculate discounted items stats for just this member
+      const filtered = new Map();
+      
+      // Iterate through accumulated receipts to rebuild discounted items stats for this member
+      const memberReceipts = accumulatedReceipts.filter(r => 
+        r.membershipNumber && String(r.membershipNumber) === membershipNumber
+      );
+      
+      memberReceipts.forEach(receipt => {
+        const items = Array.isArray(receipt.itemArray) ? receipt.itemArray : [];
+        const trxDate = receipt.transactionDateTime ||
+          (receipt.transactionDate ? receipt.transactionDate + "T00:00:00" : null);
+        const dateObj = trxDate ? new Date(trxDate) : new Date();
+        
+        items.forEach(item => {
+          const unit = Number(item.unit) || 0;
+          const amount = Number(item.amount) || 0;
+          
+          // Discounts: detect negative amounts with descriptions starting with "/" (discount line items)
+          if (unit < 0 && amount < 0 && String(item.itemDescription01 || "").trim().startsWith("/")) {
+            const refItemNum = String(item.itemDescription01 || "").trim().substring(1);
+            const refItem = items.find((it) => String(it.itemNumber) === refItemNum);
+            
+            if (refItem) {
+              const refKey = refItemNum + "|" + (refItem.itemDescription01 || "").trim();
+              const refName = (refItem.itemDescription01 || "").trim();
+              
+              let d = filtered.get(refKey);
+              if (!d) {
+                d = {
+                  itemNumber: refItemNum,
+                  name: refName,
+                  timesDiscounted: 0,
+                  totalDiscount: 0,
+                  discounts: [],
+                  membershipNumbers: new Set([membershipNumber]),
+                };
+                filtered.set(refKey, d);
+              }
+              
+              d.timesDiscounted += 1;
+              d.totalDiscount += Math.abs(amount);
+              d.discounts.push({ date: dateObj, discountAmount: Math.abs(amount) });
+            }
+          }
+        });
+      });
+      
+      return filtered;
+    }
+
+    function filterTimedStatsByMember(timedStats, membershipNumber) {
+      if (!membershipNumber) return timedStats;
+      
+      const filtered = new Map();
+      timedStats.forEach((stat, key) => {
+        // stat is now { total, membershipNumbers }
+        if (stat.membershipNumbers && stat.membershipNumbers.has(membershipNumber)) {
+          filtered.set(key, stat);
+        }
+      });
+      return filtered;
+    }
+
+    function calculateSummaryForMember(membershipNumber, itemStats, allReceipts) {
+      if (!membershipNumber) {
+        // Return the default summary (already calculated in processReceipts)
+        return null;
+      }
+      
+      // Calculate summary stats for this specific member
+      let totalSpent = 0;
+      let totalUnits = 0;
+      let totalGasSpent = 0;
+      let totalGasGallons = 0;
+      let totalDiscounts = 0;
+      let totalReturned = 0;
+      let sumItemAmounts = 0;
+      const warehousesSet = new Set();
+      const memberSeenReceipts = new Set();
+      
+      const memberReceipts = allReceipts.filter(r =>
+        r.membershipNumber && String(r.membershipNumber) === membershipNumber
+      );
+      
+      memberReceipts.forEach(receipt => {
+        const total = Number(receipt.total) || 0;
+        const receiptKey = String(
+          receipt.transactionBarcode ||
+          `${receipt.transactionDate || ''}-${receipt.transactionNumber || ''}-${receipt.sequenceNumber || ''}`
+        );
+        
+        // Avoid double counting duplicates
+        if (memberSeenReceipts.has(receiptKey)) return;
+        memberSeenReceipts.add(receiptKey);
+        
+        totalSpent += total;
+        
+        // Warehouse tracking
+        const whRaw = receipt.warehouseName || receipt.warehouse || receipt.storeName || receipt.store || "";
+        const whNum = receipt.warehouseNumber || receipt.storeNumber || null;
+        let whLabel = (whRaw && String(whRaw).trim().toUpperCase()) || "";
+        if (whLabel && whNum) {
+          whLabel = `${whLabel} (#${whNum})`;
+        } else if (!whLabel && whNum) {
+          whLabel = `#${whNum}`;
+        }
+        if (!whLabel) whLabel = "Unknown";
+        warehousesSet.add(whLabel);
+        
+        // Gasoline tracking
+        const isGasPurchase = receipt.documentType === 'FuelReceipts' || receipt.receiptType === 'Gas Station';
+        if (isGasPurchase) {
+          const items = Array.isArray(receipt.itemArray) ? receipt.itemArray : [];
+          const stationGallons = items.reduce((acc, it) => {
+            const hasFuelMarker = it.fuelGradeCode || it.fuelUomCode;
+            return acc + (hasFuelMarker ? (Number(it.fuelUnitQuantity) || 0) : 0);
+          }, 0);
+          totalGasSpent += total;
+          totalGasGallons += stationGallons;
+        }
+        
+        // Process items for units, discounts, returns
+        const items = Array.isArray(receipt.itemArray) ? receipt.itemArray : [];
+        items.forEach(item => {
+          const unit = Number(item.unit) || 0;
+          const amount = Number(item.amount) || 0;
+          
+          // Purchase items
+          if (unit > 0 && amount > 0) {
+            // Check for discounts on this item
+            let discountAmount = 0;
+            items.forEach(discItem => {
+              const discUnit = Number(discItem.unit) || 0;
+              const discAmount = Number(discItem.amount) || 0;
+              const discDesc = String(discItem.itemDescription01 || "").trim();
+              
+              if (discUnit < 0 && discAmount < 0 && discDesc.startsWith("/")) {
+                const refItemNum = discDesc.substring(1);
+                if (String(item.itemNumber) === refItemNum) {
+                  discountAmount += Math.abs(discAmount);
+                }
+              }
+            });
+            
+            const adjustedAmount = amount - discountAmount;
+            totalUnits += unit;
+            sumItemAmounts += adjustedAmount;
+          }
+          
+          // Returns/refunds
+          else if (String(receipt.transactionType) === 'Refund' && (unit < 0 || amount < 0)) {
+            totalReturned += Math.abs(amount);
+          }
+          
+          // Discounts
+          else if (unit < 0 && amount < 0 && String(item.itemDescription01 || "").trim().startsWith("/")) {
+            totalDiscounts += Math.abs(amount);
+          }
+        });
+      });
+      
+      // Filter item stats for this member to get unique items count
+      const filteredItemStats = filterItemStatsByMember(itemStats, membershipNumber);
+      
+      const avgItemPrice = totalUnits > 0 ? sumItemAmounts / totalUnits : 0;
+      const avgPerReceipt = memberReceipts.length > 0 ? totalSpent / memberReceipts.length : 0;
+      const avgGasPrice = totalGasGallons > 0 ? totalGasSpent / totalGasGallons : 0;
+      
+      return {
+        totalSpent,
+        totalUnits,
+        receiptsCount: memberReceipts.length,
+        uniqueItems: filteredItemStats.size,
+        uniqueWarehouses: warehousesSet.size,
+        totalGasSpent,
+        totalGasGallons,
+        avgGasPrice,
+        avgItemPrice,
+        avgPerReceipt,
+        totalDiscounts,
+        totalReturned,
+      };
     }
 
     function filterItemStatsByMember(itemStats, membershipNumber) {
@@ -606,8 +957,8 @@
  
     function processReceipts(receipts) {
       const itemStats = new Map(); // key -> stats
-      const monthlyTotals = new Map(); // "YYYY-MM" -> total
-      const yearlyTotals = new Map(); // "YYYY" -> total
+      const monthlyTotals = new Map(); // "YYYY-MM" -> { total, membershipNumbers: Set }
+      const yearlyTotals = new Map(); // "YYYY" -> { total, membershipNumbers: Set }
   const warehouses = new Set(); // collect unique warehouse names
   const warehouseStats = new Map(); // label -> { total, trips }
   const returnsStats = new Map(); // key -> { itemNumber, name, totalRefund (negative), returnsCount, refunds[] }
@@ -626,21 +977,26 @@
       receipts.forEach((receipt) => {
         const total = Number(receipt.total) || 0;
         totalSpent += total;
- 
+        const membershipNumber = receipt.membershipNumber ? String(receipt.membershipNumber) : null;
+
         const monthKey = (receipt.transactionDate || "").slice(0, 7); // YYYY-MM
         if (monthKey) {
-          monthlyTotals.set(
-            monthKey,
-            (monthlyTotals.get(monthKey) || 0) + total
-          );
+          const monthData = monthlyTotals.get(monthKey) || { total: 0, membershipNumbers: new Set() };
+          monthData.total += total;
+          if (membershipNumber) {
+            monthData.membershipNumbers.add(membershipNumber);
+          }
+          monthlyTotals.set(monthKey, monthData);
         }
 
         const yearKey = (receipt.transactionDate || "").slice(0, 4); // YYYY
         if (yearKey) {
-          yearlyTotals.set(
-            yearKey,
-            (yearlyTotals.get(yearKey) || 0) + total
-          );
+          const yearData = yearlyTotals.get(yearKey) || { total: 0, membershipNumbers: new Set() };
+          yearData.total += total;
+          if (membershipNumber) {
+            yearData.membershipNumbers.add(membershipNumber);
+          }
+          yearlyTotals.set(yearKey, yearData);
         }
  
         // Determine a friendly warehouse label and track per-warehouse totals/trips
@@ -657,9 +1013,12 @@
         warehouses.add(whLabel);
 
         // Accumulate per-warehouse totals and trip counts
-        const ws = warehouseStats.get(whLabel) || { total: 0, trips: 0 };
+        const ws = warehouseStats.get(whLabel) || { total: 0, trips: 0, membershipNumbers: new Set() };
         ws.total += total;
         ws.trips += 1;
+        if (membershipNumber) {
+          ws.membershipNumbers.add(membershipNumber);
+        }
         warehouseStats.set(whLabel, ws);
 
         const items = Array.isArray(receipt.itemArray)
@@ -679,14 +1038,21 @@
         if (isGasPurchase) {
           const stationName = whLabel;
           // Sum fuel unit quantities from item lines for this receipt
+          // Only count items that have fuel markers (fuelGradeCode or fuelUomCode)
           const stationGallons = items.reduce(
-            (acc, it) => acc + (Number(it.fuelUnitQuantity) || 0),
+            (acc, it) => {
+              const hasFuelMarker = it.fuelGradeCode || it.fuelUomCode;
+              return acc + (hasFuelMarker ? (Number(it.fuelUnitQuantity) || 0) : 0);
+            },
             0
           );
-          const gs = gasolineStats.get(stationName) || { total: 0, fillUps: 0, totalGallons: 0 };
+          const gs = gasolineStats.get(stationName) || { total: 0, fillUps: 0, totalGallons: 0, membershipNumbers: new Set() };
           gs.total += total;
           gs.fillUps += 1;
           gs.totalGallons = (gs.totalGallons || 0) + stationGallons;
+          if (membershipNumber) {
+            gs.membershipNumbers.add(membershipNumber);
+          }
           gasolineStats.set(stationName, gs);
 
           totalGasSpent += total;
@@ -694,7 +1060,6 @@
         }
 
         // Aggregate member stats (for both In-Warehouse and Gas Station when membershipNumber is present)
-        const membershipNumber = receipt.membershipNumber ? String(receipt.membershipNumber) : null;
         if (membershipNumber) {
           // Build a unique key per receipt to avoid double-counting if duplicates exist
           const receiptKey = String(
@@ -829,6 +1194,7 @@
                 totalRefund: 0, // negative sum
                 returnsCount: 0, // sum of absolute units returned (or 1 when unit is 0)
                 refunds: [],
+                membershipNumbers: new Set(),
               };
               returnsStats.set(key, r);
             }
@@ -837,6 +1203,9 @@
             // If unit is zero (some refunds may not include unit), count the transaction as 1
             r.returnsCount += Math.abs(unit) || 1;
             r.refunds.push({ date: trxDate, amountPerUnit: rawPerUnitPrice });
+            if (membershipNumber) {
+              r.membershipNumbers.add(membershipNumber);
+            }
             
             // Accumulate total returned (take absolute value of negative refund amount)
             totalReturned += Math.abs(amount);
@@ -861,6 +1230,7 @@
                   timesDiscounted: 0,
                   totalDiscount: 0,
                   discounts: [],
+                  membershipNumbers: new Set(),
                 };
                 discountedItemStats.set(refKey, d);
               }
@@ -868,6 +1238,9 @@
               d.timesDiscounted += 1;
               d.totalDiscount += Math.abs(amount); // discount amount is negative, so take absolute
               d.discounts.push({ date: trxDate, discountAmount: Math.abs(amount) });
+              if (membershipNumber) {
+                d.membershipNumbers.add(membershipNumber);
+              }
               
               totalDiscounts += Math.abs(amount);
             }
@@ -909,7 +1282,12 @@
       };
     }
  
-    function renderSummary(summary) {
+    function renderSummary(summary, membershipNumber = null, itemStats = null) {
+      // If filtering by member, recalculate summary for that member
+      if (membershipNumber && itemStats) {
+        summary = calculateSummaryForMember(membershipNumber, itemStats, accumulatedReceipts);
+      }
+      
       document.getElementById("totalPurchases").textContent =
         summary.totalUnits.toLocaleString();
       document.getElementById("uniqueItems").textContent =
@@ -994,12 +1372,15 @@
       });
     }
 
-    function renderMostReturned(returnsStats) {
+    function renderMostReturned(returnsStats, membershipNumber = null) {
       const tbody = document.getElementById("mostReturnedBody");
       if (!tbody) return;
       tbody.innerHTML = "";
 
-      const rows = Array.from(returnsStats.values())
+      // Filter by member if specified
+      const filtered = filterReturnsStatsByMember(returnsStats, membershipNumber);
+
+      const rows = Array.from(filtered.values())
         .map((s) => ({
           itemNumber: s.itemNumber,
           name: s.name,
@@ -1042,12 +1423,15 @@
       });
     }
 
-    function renderGasoline(gasolineStats) {
+    function renderGasoline(gasolineStats, membershipNumber = null) {
       const tbody = document.getElementById("gasolineBody");
       if (!tbody) return;
       tbody.innerHTML = "";
 
-      const rows = Array.from(gasolineStats.entries())
+      // Filter by member if specified
+      const filtered = filterGasolineStatsByMember(gasolineStats, membershipNumber);
+
+      const rows = Array.from(filtered.entries())
         .map(([name, s]) => ({
           name,
           fillUps: s.fillUps,
@@ -1096,12 +1480,21 @@
       });
     }
 
-    function renderMemberStats(memberStats) {
+    function renderMemberStats(memberStats, filterMembershipNumber = null) {
       const tbody = document.getElementById("memberStatsBody");
       if (!tbody) return;
       tbody.innerHTML = "";
 
-      const rows = Array.from(memberStats.values())
+      // If filtering by member, show only that member; otherwise show all
+      let stats = memberStats;
+      if (filterMembershipNumber) {
+        stats = new Map();
+        if (memberStats.has(filterMembershipNumber)) {
+          stats.set(filterMembershipNumber, memberStats.get(filterMembershipNumber));
+        }
+      }
+
+      const rows = Array.from(stats.values())
         .map((m) => {
           // Preferred warehouse: most trips (minimum 3 trips required)
           let prefWh = "No Preference";
@@ -1501,12 +1894,15 @@
         });
     }
 
-        function renderWarehouseBreakdown(warehouseStats) {
+        function renderWarehouseBreakdown(warehouseStats, membershipNumber = null) {
           const tbody = document.getElementById("warehouseBody");
           if (!tbody) return;
           tbody.innerHTML = "";
 
-          const rows = Array.from(warehouseStats.entries())
+          // Filter by member if specified
+          const filtered = filterWarehouseStatsByMember(warehouseStats, membershipNumber);
+
+          const rows = Array.from(filtered.entries())
             .map(([name, s]) => ({ name, trips: s.trips, total: s.total }))
             .sort((a, b) => b.total - a.total)
             .slice(0, 100);
@@ -1535,12 +1931,15 @@
           });
         }
 
-    function renderDiscountedItems(discountedItemStats) {
+    function renderDiscountedItems(discountedItemStats, membershipNumber = null) {
       const tbody = document.getElementById("discountedItemsBody");
       if (!tbody) return;
       tbody.innerHTML = "";
 
-      const rows = Array.from(discountedItemStats.values())
+      // Filter by member if specified
+      const filtered = filterDiscountedItemStatsByMember(discountedItemStats, membershipNumber);
+
+      const rows = Array.from(filtered.values())
         .map((s) => ({
           itemNumber: s.itemNumber,
           name: s.name,
@@ -1585,16 +1984,20 @@
  
     let timedCharts = {};
  
-    function renderTimedChart(totals, id) {
+    function renderTimedChart(totals, id, membershipNumber = null) {
       const ctx = document
         .getElementById(id)
         .getContext("2d");
  
-      const entries = Array.from(totals.entries()).sort(
+      // Filter by member if specified
+      const filtered = filterTimedStatsByMember(totals, membershipNumber);
+
+      const entries = Array.from(filtered.entries()).sort(
         (a, b) => (a[0] < b[0] ? -1 : 1)
       );
       const labels = entries.map(([m]) => m);
-      const data = entries.map(([, v]) => v);
+      // Extract the total from the stat object (which has { total, membershipNumbers })
+      const data = entries.map(([, v]) => typeof v === 'object' && v.total !== undefined ? v.total : v);
  
       if (timedCharts[id]) {
         timedCharts[id].destroy();
@@ -1669,74 +2072,98 @@
       const data = allReceiptsData;
       const filteredItemStats = filterItemStatsByMember(data.itemStats, currentFilterMember);
 
-      // For now, only filter the item-based cards; other cards show all members
+      // Filter item-based cards by member
       renderMostTotalSpent(filteredItemStats);
       renderMostPurchased(filteredItemStats);
       renderMostExpensive(filteredItemStats);
       renderPriceIncreases(filteredItemStats);
       
-      // These cards don't have member-specific data yet, so render all
-      renderSummary(data.summary);
-      if (data.warehouseStats) renderWarehouseBreakdown(data.warehouseStats);
-      if (data.returnsStats) renderMostReturned(data.returnsStats);
-      if (data.gasolineStats) renderGasoline(data.gasolineStats);
-      if (data.discountedItemStats) renderDiscountedItems(data.discountedItemStats);
-      if (data.memberStats) renderMemberStats(data.memberStats);
-      renderTimedChart(data.monthlyTotals, 'monthlyChart');
-      renderTimedChart(data.yearlyTotals, 'yearlyChart');
+      // Filter all other cards by member as well
+      renderSummary(data.summary, currentFilterMember, data.itemStats);
+      if (data.warehouseStats) renderWarehouseBreakdown(data.warehouseStats, currentFilterMember);
+      if (data.returnsStats) renderMostReturned(data.returnsStats, currentFilterMember);
+      if (data.gasolineStats) renderGasoline(data.gasolineStats, currentFilterMember);
+      if (data.discountedItemStats) renderDiscountedItems(data.discountedItemStats, currentFilterMember);
+      if (data.memberStats) renderMemberStats(data.memberStats, currentFilterMember);
+      renderTimedChart(data.monthlyTotals, 'monthlyChart', currentFilterMember);
+      renderTimedChart(data.yearlyTotals, 'yearlyChart', currentFilterMember);
     }
  
-    // File input handler
+    // File input handler - support multiple files
     document
       .getElementById("fileInput")
       .addEventListener("change", (e) => {
         const statusEl = document.getElementById("status");
-        const file = e.target.files[0];
-        if (!file) return;
- 
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          try {
-            const json = JSON.parse(event.target.result);
-            if (!Array.isArray(json)) {
-              throw new Error(
-                "Expected the JSON to be an array of receipts."
-              );
-            }
-            
-            // Extract date range from receipts
-            let minDate = null;
-            let maxDate = null;
-            json.forEach((receipt) => {
-              const dateStr = receipt.transactionDate || receipt.transactionDateTime;
-              if (dateStr) {
-                const date = new Date(dateStr);
-                if (!minDate || date < minDate) minDate = date;
-                if (!maxDate || date > maxDate) maxDate = date;
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
+
+        let filesProcessed = 0;
+        let allNewReceipts = [];
+        let hasError = false;
+
+        Array.from(files).forEach((file, fileIndex) => {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            try {
+              const json = JSON.parse(event.target.result);
+              if (!Array.isArray(json)) {
+                throw new Error(
+                  `File ${file.name}: Expected the JSON to be an array of receipts.`
+                );
               }
-            });
-            
-            let dateRangeText = "";
-            if (minDate && maxDate) {
-              const formatter = new Intl.DateTimeFormat("en-US", {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-              });
-              dateRangeText = ` • ${formatter.format(minDate)} to ${formatter.format(maxDate)}`;
+              allNewReceipts.push(...json);
+            } catch (err) {
+              console.error(err);
+              statusEl.textContent = "Error reading file: " + err.message;
+              statusEl.classList.add("error");
+              hasError = true;
             }
-            
-            statusEl.textContent = `Loaded ${json.length.toLocaleString()} receipts.${dateRangeText}`;
-            statusEl.classList.remove("error");
-            handleData(json);
-          } catch (err) {
-            console.error(err);
-            statusEl.textContent =
-              "Error reading file: " + err.message;
-            statusEl.classList.add("error");
-          }
-        };
-        reader.readAsText(file);
+
+            filesProcessed++;
+            // Process all files before updating the display
+            if (filesProcessed === files.length && !hasError) {
+              // Deduplicate and add to accumulated receipts
+              const uniqueNewReceipts = deduplicateReceipts(allNewReceipts);
+              accumulatedReceipts.push(...uniqueNewReceipts);
+              
+              // Extract date range from all accumulated receipts
+              let minDate = null;
+              let maxDate = null;
+              accumulatedReceipts.forEach((receipt) => {
+                const dateStr = receipt.transactionDate || receipt.transactionDateTime;
+                if (dateStr) {
+                  const date = new Date(dateStr);
+                  if (!minDate || date < minDate) minDate = date;
+                  if (!maxDate || date > maxDate) maxDate = date;
+                }
+              });
+              
+              let dateRangeText = "";
+              if (minDate && maxDate) {
+                const formatter = new Intl.DateTimeFormat("en-US", {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                });
+                dateRangeText = ` • ${formatter.format(minDate)} to ${formatter.format(maxDate)}`;
+              }
+              
+              const duplicatesCount = allNewReceipts.length - uniqueNewReceipts.length;
+              let duplicateText = "";
+              if (duplicatesCount > 0) {
+                duplicateText = ` (${duplicatesCount.toLocaleString()} duplicates removed)`;
+              }
+              
+              statusEl.textContent = `Loaded ${accumulatedReceipts.length.toLocaleString()} total receipts.${dateRangeText}${duplicateText}`;
+              statusEl.classList.remove("error");
+              handleData(accumulatedReceipts);
+              
+              // Clear file input so uploading the same files again works
+              document.getElementById("fileInput").value = "";
+            }
+          };
+          reader.readAsText(file);
+        });
       });
   </script>
 </body>

@@ -14,8 +14,10 @@ A small, single-file browser dashboard to analyze Costco receipt JSON exports. D
 1. Open `dashboard.html` in a browser (double-click the file or use a local static server).
 2. Option A — Use the included downloader snippet to fetch receipts from the Costco site:
 	- Open the browser console on https://www.costco.com/OrderStatusCmd and paste the contents of `download_costco_receipts.js` (the snippet is documented at the top of that file). It will download a JSON file containing your receipts.
-3. Option B — Upload an existing receipts JSON file using the `Receipts JSON` file input near the top of the dashboard.
-4. The page will parse the file, show a status line with the number of receipts and the date range, and populate all cards/tables.
+3. Option B — Upload receipts JSON file(s) using the `Receipts JSON` file input near the top of the dashboard:
+	- You can upload multiple files at once (useful for household receipts from multiple members).
+	- The dashboard automatically deduplicates receipts to prevent double-counting if you upload the same file multiple times.
+4. The page will parse the file(s), show a status line with the total number of receipts and the date range, and populate all cards/tables.
 
 Notes on data requirements
 - The dashboard expects an array of receipt objects (the shape returned by the GraphQL snippet included). If your JSON uses a different shape, transform it to an array of receipts before loading.
