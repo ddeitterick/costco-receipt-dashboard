@@ -13,94 +13,113 @@ async function listReceipts(startDate, endDate) {
         xhr.setRequestHeader('Costco-X-Wcs-Clientid', localStorage.getItem('clientID'));
         xhr.setRequestHeader('Client-Identifier', '481b1aec-aa3b-454b-b81b-48187e28f205');
         xhr.setRequestHeader('Costco-X-Authorization', 'Bearer ' + localStorage.getItem('idToken'));
-        const listReceiptsQuery = {
-            "query": `
-                query receipts($startDate: String!, $endDate: String!) {
-                  receipts(startDate: $startDate, endDate: $endDate) {
-                    warehouseName
-                    documentType
-                    transactionDateTime
-                    transactionDate
-                    companyNumber
-                    warehouseNumber
-                    operatorNumber
-                    warehouseName
-                    warehouseShortName
-                    registerNumber
-                    transactionNumber
-                    transactionType
-                    transactionBarcode
-                    total
-                    warehouseAddress1
-                    warehouseAddress2
-                    warehouseCity
-                    warehouseState
-                    warehouseCountry
-                    warehousePostalCode
-                    totalItemCount
-                    subTotal
-                    taxes
-                    total
-                    itemArray {
-                        itemNumber
-                        itemDescription01
-                        frenchItemDescription1
-                        itemDescription02
-                        frenchItemDescription2
-                        itemIdentifier
-                        unit
-                        amount
-                        taxFlag
-                        merchantID
-                        entryMethod
-                    }
-                    tenderArray {
-                        tenderTypeCode
-                        tenderDescription
-                        amountTender
-                        displayAccountNumber
-                        sequenceNumber
-                        approvalNumber
-                        responseCode
-                        transactionID
-                        merchantID
-                        entryMethod
-                    }
-                    couponArray {
-                        upcnumberCoupon
-                        voidflagCoupon
-                        refundflagCoupon
-                        taxflagCoupon
-                        amountCoupon
-                    }
-                    subTaxes {
-                        tax1
-                        tax2
-                        tax3
-                        tax4
-                        aTaxPercent
-                        aTaxLegend
-                        aTaxAmount
-                        bTaxPercent
-                        bTaxLegend
-                        bTaxAmount
-                        cTaxPercent
-                        cTaxLegend
-                        cTaxAmount
-                        dTaxAmount
-                    }
-                    instantSavings
-                    membershipNumber
-                  }
-                }`.replace(/\s+/g,' '),
-            "variables": {
-                "startDate": startDate,
-                "endDate": endDate
-            }
-        };
+                        const listReceiptsQuery = {
+                                "query": `
+                                        query receiptsWithCounts($startDate: String!, $endDate: String!) {
+                                            receiptsWithCounts(startDate: $startDate, endDate: $endDate) {
+                                                inWarehouse
+                                                gasStation
+                                                carWash
+                                                gasAndCarWash
+                                                receipts {
+                                                    warehouseName
+                                                    receiptType
+                                                    documentType
+                                                    transactionDateTime
+                                                    transactionDate
+                                                    companyNumber
+                                                    warehouseNumber
+                                                    operatorNumber
+                                                    warehouseShortName
+                                                    registerNumber
+                                                    transactionNumber
+                                                    transactionType
+                                                    transactionBarcode
+                                                    total
+                                                    warehouseAddress1
+                                                    warehouseAddress2
+                                                    warehouseCity
+                                                    warehouseState
+                                                    warehouseCountry
+                                                    warehousePostalCode
+                                                    totalItemCount
+                                                    subTotal
+                                                    taxes
+                                                    instantSavings
+                                                    membershipNumber
+                                                    itemArray {
+                                                        itemNumber
+                                                        itemDescription01
+                                                        frenchItemDescription1
+                                                        itemDescription02
+                                                        frenchItemDescription2
+                                                        itemIdentifier
+                                                        unit
+                                                        amount
+                                                        taxFlag
+                                                        merchantID
+                                                        entryMethod
+                                                    }
+                                                    tenderArray {
+                                                        tenderTypeCode
+                                                        tenderDescription
+                                                        amountTender
+                                                        displayAccountNumber
+                                                        sequenceNumber
+                                                        approvalNumber
+                                                        responseCode
+                                                        transactionID
+                                                        merchantID
+                                                        entryMethod
+                                                    }
+                                                    couponArray {
+                                                        upcnumberCoupon
+                                                        voidflagCoupon
+                                                        refundflagCoupon
+                                                        taxflagCoupon
+                                                        amountCoupon
+                                                    }
+                                                    subTaxes {
+                                                        tax1
+                                                        tax2
+                                                        tax3
+                                                        tax4
+                                                        aTaxPercent
+                                                        aTaxLegend
+                                                        aTaxAmount
+                                                        bTaxPercent
+                                                        bTaxLegend
+                                                        bTaxAmount
+                                                        cTaxPercent
+                                                        cTaxLegend
+                                                        cTaxAmount
+                                                        dTaxAmount
+                                                    }
+                                                }
+                                            }
+                                        }`.replace(/\s+/g,' '),
+                                "variables": {
+                                        "startDate": startDate,
+                                        "endDate": endDate
+                                }
+                        };
         xhr.onload = async function() {
             if (xhr.status === 200) {
-                resolve(xhr.response.data.receipts);
+                try {
+                    const data = xhr.response && xhr.response.data;
+                    if (!data) return resolve([]);
+                    // Prefer the new shape receiptsWithCounts.receipts, fall back to receipts
+                    if (data.receiptsWithCounts && Array.isArray(data.receiptsWithCounts.receipts)) {
+                        resolve(data.receiptsWithCounts.receipts);
+                    } else if (Array.isArray(data.receipts)) {
+                        resolve(data.receipts);
+                    } else {
+                        resolve([]);
+                    }
+                } catch (e) {
+                    // If parsing failed but status is 200, still resolve empty array
+                    resolve([]);
+                }
             } else {
                 reject(xhr.status);
             }
