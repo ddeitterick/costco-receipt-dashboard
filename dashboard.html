@@ -379,6 +379,43 @@
       </div>
     </section>
  
+    <section class="grid-2">
+      <div class="card">
+        <h2><span class="icon">🏬</span>Spending by Warehouse</h2>
+        <p class="subtitle">Total spent and number of shopping trips per warehouse.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Warehouse</th>
+              <th>Trips</th>
+              <th>Total Spent</th>
+            </tr>
+          </thead>
+          <tbody id="warehouseBody">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2><span class="icon">↩️</span>Most Returned Items</h2>
+        <p class="subtitle">Items with the largest total refunds.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>Times Returned</th>
+              <th>Total Refunded</th>
+              <th>Avg Refund</th>
+            </tr>
+          </thead>
+          <tbody id="mostReturnedBody">
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="card">
       <h2><span class="icon">📊</span>Monthly Spending Trend</h2>
       <p class="subtitle">Total spent per month.</p>
@@ -417,7 +454,9 @@
       const itemStats = new Map(); // key -> stats
       const monthlyTotals = new Map(); // "YYYY-MM" -> total
       const yearlyTotals = new Map(); // "YYYY" -> total
-      const warehouses = new Set(); // collect unique warehouse names
+  const warehouses = new Set(); // collect unique warehouse names
+  const warehouseStats = new Map(); // label -> { total, trips }
+  const returnsStats = new Map(); // key -> { itemNumber, name, totalRefund (negative), returnsCount, refunds[] }
       let totalSpent = 0;
       let sumItemAmounts = 0;
       let totalUnits = 0;
@@ -442,10 +481,24 @@
           );
         }
  
-        // Track warehouse names (some inputs use different property names)
-        const whName =
-          receipt.warehouseName || receipt.warehouse || receipt.storeName || receipt.store;
-        if (whName) warehouses.add(String(whName).trim());
+        // Determine a friendly warehouse label and track per-warehouse totals/trips
+        const whRaw =
+          receipt.warehouseName || receipt.warehouse || receipt.storeName || receipt.store || "";
+        const whNum = receipt.warehouseNumber || receipt.storeNumber || null;
+        let whLabel = (whRaw && String(whRaw).trim()) || "";
+        if (whLabel && whNum) {
+          whLabel = `${whLabel} (#${whNum})`;
+        } else if (!whLabel && whNum) {
+          whLabel = `#${whNum}`;
+        }
+        if (!whLabel) whLabel = "Unknown";
+        warehouses.add(whLabel);
+
+        // Accumulate per-warehouse totals and trip counts
+        const ws = warehouseStats.get(whLabel) || { total: 0, trips: 0 };
+        ws.total += total;
+        ws.trips += 1;
+        warehouseStats.set(whLabel, ws);
 
         const items = Array.isArray(receipt.itemArray)
           ? receipt.itemArray
@@ -460,36 +513,60 @@
         items.forEach((item) => {
           const unit = Number(item.unit) || 0;
           const amount = Number(item.amount) || 0;
- 
-          // Skip coupons / negative adjustments / weird lines
-          if (!item.itemNumber || unit <= 0 || amount <= 0) return;
- 
+
+          // Skip lines without an item number or zero-quantity/zero-amount rows
+          if (!item.itemNumber || unit === 0 || amount === 0) return;
+
           const key =
             item.itemNumber + "|" + (item.itemDescription01 || "").trim();
           const name = (item.itemDescription01 || "").trim();
- 
+
           const perUnitPrice = amount / unit;
- 
-          let stat = itemStats.get(key);
-          if (!stat) {
-            stat = {
-              itemNumber: item.itemNumber,
-              name,
-              totalSpent: 0,
-              totalUnits: 0,
-              purchases: 0,
-              prices: [], // {date, price}
-            };
-            itemStats.set(key, stat);
+
+          // Purchases (positive units & amounts)
+          if (unit > 0 && amount > 0) {
+            let stat = itemStats.get(key);
+            if (!stat) {
+              stat = {
+                itemNumber: item.itemNumber,
+                name,
+                totalSpent: 0,
+                totalUnits: 0,
+                purchases: 0,
+                prices: [], // {date, price}
+              };
+              itemStats.set(key, stat);
+            }
+
+            stat.totalSpent += amount;
+            stat.totalUnits += unit;
+            stat.purchases += unit;
+            stat.prices.push({ date: trxDate, price: perUnitPrice });
+
+            // Keep existing summary metrics based on purchases only
+            sumItemAmounts += amount;
+            totalUnits += unit;
           }
- 
-          stat.totalSpent += amount;
-          stat.totalUnits += unit;
-          stat.purchases += unit;
-          stat.prices.push({ date: trxDate, price: perUnitPrice });
- 
-          sumItemAmounts += amount;
-          totalUnits += unit;
+
+          // Returns / refunds: treat rows as returns when the receipt's transactionType is 'Refund'
+          else if (String(receipt.transactionType) === 'Refund') {
+            let r = returnsStats.get(key);
+            if (!r) {
+              r = {
+                itemNumber: item.itemNumber,
+                name,
+                totalRefund: 0, // negative sum
+                returnsCount: 0, // sum of absolute units returned (or 1 when unit is 0)
+                refunds: [],
+              };
+              returnsStats.set(key, r);
+            }
+
+            r.totalRefund += amount; // amount is negative
+            // If unit is zero (some refunds may not include unit), count the transaction as 1
+            r.returnsCount += Math.abs(unit) || 1;
+            r.refunds.push({ date: trxDate, amountPerUnit: perUnitPrice });
+          }
         });
       });
  
@@ -504,6 +581,8 @@
         itemStats,
         monthlyTotals,
         yearlyTotals,
+        warehouseStats,
+        returnsStats,
         summary: {
           totalSpent,
           totalUnits,
@@ -577,6 +656,54 @@
         );
         tr.appendChild(avgTd);
  
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderMostReturned(returnsStats) {
+      const tbody = document.getElementById("mostReturnedBody");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      const rows = Array.from(returnsStats.values())
+        .map((s) => ({
+          itemNumber: s.itemNumber,
+          name: s.name,
+          returnsCount: s.returnsCount,
+          totalRefund: s.totalRefund,
+          avgRefund: s.returnsCount > 0 ? Math.abs(s.totalRefund) / s.returnsCount : 0,
+        }))
+  .sort((a, b) => Math.abs(b.totalRefund) - Math.abs(a.totalRefund))
+  .slice(0, 10);
+
+      rows.forEach((row, idx) => {
+        const tr = document.createElement("tr");
+
+        const rankTd = document.createElement("td");
+        rankTd.textContent = idx + 1;
+        tr.appendChild(rankTd);
+
+        const itemTd = document.createElement("td");
+        itemTd.innerHTML =
+          "<strong>" + row.name + "</strong><br/><span class='status'>#" +
+          row.itemNumber +
+          "</span>";
+        tr.appendChild(itemTd);
+
+        const timesTd = document.createElement("td");
+        timesTd.textContent = row.returnsCount.toLocaleString() + "×";
+        tr.appendChild(timesTd);
+
+        const totalTd = document.createElement("td");
+        totalTd.className = "money neg";
+        totalTd.textContent = formatMoney(Math.abs(row.totalRefund));
+        tr.appendChild(totalTd);
+
+        const avgTd = document.createElement("td");
+        avgTd.className = "money neg";
+        avgTd.textContent = formatMoney(row.avgRefund);
+        tr.appendChild(avgTd);
+
         tbody.appendChild(tr);
       });
     }
@@ -789,6 +916,40 @@
           tbody.appendChild(tr);
         });
     }
+
+        function renderWarehouseBreakdown(warehouseStats) {
+          const tbody = document.getElementById("warehouseBody");
+          if (!tbody) return;
+          tbody.innerHTML = "";
+
+          const rows = Array.from(warehouseStats.entries())
+            .map(([name, s]) => ({ name, trips: s.trips, total: s.total }))
+            .sort((a, b) => b.total - a.total)
+            .slice(0, 100);
+
+          rows.forEach((row, idx) => {
+            const tr = document.createElement("tr");
+
+            const rankTd = document.createElement("td");
+            rankTd.textContent = idx + 1;
+            tr.appendChild(rankTd);
+
+            const nameTd = document.createElement("td");
+            nameTd.textContent = row.name;
+            tr.appendChild(nameTd);
+
+            const tripsTd = document.createElement("td");
+            tripsTd.textContent = row.trips.toLocaleString();
+            tr.appendChild(tripsTd);
+
+            const totalTd = document.createElement("td");
+            totalTd.className = "money";
+            totalTd.textContent = formatMoney(row.total);
+            tr.appendChild(totalTd);
+
+            tbody.appendChild(tr);
+          });
+        }
  
     let timedCharts = {};
  
@@ -836,10 +997,12 @@
     }
  
     function handleData(receipts) {
-      const { itemStats, monthlyTotals, yearlyTotals, summary } =
+      const { itemStats, monthlyTotals, yearlyTotals, summary, warehouseStats, returnsStats } =
         processReceipts(receipts);
- 
+
       renderSummary(summary);
+      if (warehouseStats) renderWarehouseBreakdown(warehouseStats);
+      if (returnsStats) renderMostReturned(returnsStats);
       renderMostTotalSpent(itemStats);
       renderMostPurchased(itemStats);
       renderMostExpensive(itemStats);
