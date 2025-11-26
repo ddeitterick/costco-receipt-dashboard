@@ -2,6 +2,8 @@
 
 A small, single-file browser dashboard to analyze Costco receipt JSON exports. Drop a receipts JSON into the page and get quick insights: totals, top items, returns, discounts, and gasoline analytics. The project includes a small browser snippet (`download_costco_receipts.js`) you can run from the Costco site to export your receipts.
 
+<img alt="image" src="https://github.com/user-attachments/assets/4532bdfa-8204-42d5-9d3d-ec09b4b82af4" />
+
 ## Features
 - Upload / analyze a JSON array of Costco receipts (no server required).
 - Summary cards for totals (spend, receipts, unique items/warehouses, gas, discounts, returns).
