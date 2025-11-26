@@ -6,6 +6,8 @@ A small, single-file browser dashboard to analyze Costco receipt JSON exports. D
 - Upload / analyze a JSON array of Costco receipts (no server required).
 - Summary cards for totals (spend, receipts, unique items/warehouses, gas, discounts, returns).
 - Top tables and charts: most-spent items, most-purchased items, biggest price increases, per-warehouse spend, refunds, gasoline breakdown, and top discounted products.
+- **Member filtering**: View aggregated stats for all members or drill down to see individual member spending and purchase history.
+- **Member stats card**: Per-member summaries including total spent, trip count, average items per trip, preferred warehouse and gas station (based on frequency with 3+ visits minimum).
 - Discounts are detected (heuristic) and applied to per-item pricing so price-based metrics reflect net paid amounts.
 
 ## Quick start
@@ -17,6 +19,7 @@ A small, single-file browser dashboard to analyze Costco receipt JSON exports. D
 
 Notes on data requirements
 - The dashboard expects an array of receipt objects (the shape returned by the GraphQL snippet included). If your JSON uses a different shape, transform it to an array of receipts before loading.
+- For member filtering and member stats to work, receipt objects should include a `membershipNumber` field (the Costco member ID). Receipts without this field won't appear in per-member views.
 - For gasoline analytics the dashboard uses `itemArray[].fuelUnitQuantity` to compute gallons. If fuel lines lack that field, gallons and $/gallon averages will be incomplete.
 - Discount detection: the dashboard recognizes discount line items when a line has a negative `unit` and negative `amount` and `itemDescription01` starts with `"/<itemNumber>"` (this matches the typical Costco refund/discount line that references the original SKU). Receipt-level `instantSavings` are not automatically distributed to items — see "Advanced" below if you'd like automatic allocation.
 
@@ -34,8 +37,14 @@ Notes on data requirements
 - Total Discounts: total money saved by detected discounts (sum of absolute discount line amounts).
 - Total Returned: total refunded amount (sum of absolute refund amounts); amounts are shown in black (not red).
 
+### Member Filter (top right)
+- Use the **Filter by Member** dropdown to view analytics for a specific member or all members. When a member is selected:
+  - The **Most Total Spent Items**, **Most Purchased Items**, **Most Expensive Items**, and **Biggest Price Increases** tables show only that member's purchases and prices.
+  - Other cards (warehouse, returns, gasoline, discounts, member stats, and charts) continue to show aggregated data across all members.
+
 ### Most Total Spent Items
 - Top items by total money spent (uses discounted amounts where discounts reference the purchased line).
+- When filtering by member, shows the member's top items by spend.
 
 ### Biggest Price Increases
 - Items that increased most between their min and max observed per-unit prices. Prices are computed from adjusted (discount-applied) purchase amounts.
@@ -48,6 +57,15 @@ Notes on data requirements
 
 ### Spending by Warehouse
 - Per-warehouse totals and trip counts. Warehouse labels are normalized and include warehouse number when available.
+
+### Member Stats
+- Per-member spending summary (all members shown, not filtered by the member dropdown):
+  - **Membership Number**: unique identifier for the member.
+  - **Total Spent**: grand total across all receipts for that member.
+  - **Trips**: number of shopping trips (receipts) for the member.
+  - **Avg Items/Trip**: average number of units purchased per trip.
+  - **Preferred Warehouse**: warehouse with the most visits (requires 3+ trips); shows "No Preference" if no warehouse has 3+ visits.
+  - **Preferred Gas Station**: gas station with the most fill-ups (requires 3+ gas trips); shows "No Preference" if not met.
 
 ### Most Returned Items
 - Items with the largest total refunds. Refunds are aggregated from receipts whose `transactionType` is `Refund`. Refund amounts are displayed in black.
@@ -65,10 +83,10 @@ Notes on data requirements
 - If you have issues running the download_costco_receipts.js all at once (especially when using Safari), run each section of Javascript (there should be 3 sections) individually.
 
 ## Acknowledgements
-Thanks to the authors and resources that inspired or provided parts of this dashboard and tooling:
+Thanks to the authors and resources that inspired or provided parts of this dashboard and script:
 
 - [Your list here] — add names, projects, or links you'd like to credit.
-ankurdave - https://github.com/ankurdave/beancount_import_sources/blob/main/download/download_costco_receipts.js
-
-Thanks u/ikeee for the OG report and u/ViKoToMo for the updated version!
-Also thank you to u/webrender for the YouTube video on how to run the Javascript (https://www.youtube.com/watch?v=v0zRaWkQ5lQ)
+- ankurdave - https://github.com/ankurdave/beancount_import_sources/blob/main/download/download_costco_receipts.js
+- u/ikeee for the OG report
+- u/ViKoToMo for the updated version
+- u/webrender for the YouTube video on how to run the Javascript (https://www.youtube.com/watch?v=v0zRaWkQ5lQ)
