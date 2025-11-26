@@ -84,6 +84,12 @@ Notes on data requirements
 - The downloader script uses tokens from local storage and must be run in the browser on the Costco site (see `download_costco_receipts.js`). Use it only on your own account and device.
 - If you have issues running the download_costco_receipts.js all at once (especially when using Safari), run each section of Javascript (there should be 3 sections) individually.
 
+## License and Attribution
+
+This project is licensed under the BSD 2-Clause "Simplified" License. See the [LICENSE](LICENSE) file for details.
+
+This project uses code from the [@ankurdave/beancount_import_sources](https://github.com/ankurdave/beancount_import_sources) repository, which is licensed under the BSD 2-Clause "Simplified" License.
+
 ## Acknowledgements
 Thanks to the authors and resources that inspired or provided parts of this dashboard and script:
 
