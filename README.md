@@ -1,4 +1,3 @@
-```markdown
 # Costco Receipt Dashboard
 
 A small, single-file browser dashboard to analyze Costco receipt JSON exports. Drop a receipts JSON into the page and get quick insights: totals, top items, returns, discounts, and gasoline analytics. The project includes a small browser snippet (`download_costco_receipts.js`) you can run from the Costco site to export your receipts.
@@ -68,11 +67,3 @@ Notes on data requirements
 Thanks to the authors and resources that inspired or provided parts of this dashboard and tooling:
 
 - [Your list here] — add names, projects, or links you'd like to credit.
-
-If you'd like, I can add a pre-filled list of common libraries or authors to thank (Chart.js is used for charts), or add a CONTRIBUTORS section with GitHub handles.
-
----
-
-If you'd like changes to the UI (different card ordering, additional metrics, or automatic allocation of receipt-level savings across items), tell me which behavior you'd like and I can implement it.
-
-```
