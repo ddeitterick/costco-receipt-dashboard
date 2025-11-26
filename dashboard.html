@@ -211,7 +211,7 @@
     }
  
     .neg {
-      color: var(--danger);
+      color: var(--text-main);
     }
  
     .tag {
@@ -302,6 +302,16 @@
         <div class="label">Avg Per Receipt</div>
         <div class="value" id="avgPerReceipt">–</div>
         <div class="sub">Average spend per trip</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Total Discounts</div>
+        <div class="value" id="totalDiscounts">–</div>
+        <div class="sub">Total amount saved</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Total Returned</div>
+        <div class="value" id="totalReturned">–</div>
+        <div class="sub">Total refunded amount</div>
       </div>
     </section>
  
@@ -443,6 +453,26 @@
       </div>
     </section>
 
+    <section class="grid-2">
+      <div class="card">
+        <h2><span class="icon">🏷️</span>Top Discounted Items</h2>
+        <p class="subtitle">Products purchased with the largest total discounts.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>Times Purchased</th>
+              <th>Total Discount</th>
+              <th>Avg Discount</th>
+            </tr>
+          </thead>
+          <tbody id="discountedItemsBody">
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="card">
       <h2><span class="icon">📊</span>Monthly Spending Trend</h2>
       <p class="subtitle">Total spent per month.</p>
@@ -490,11 +520,14 @@
   const warehouseStats = new Map(); // label -> { total, trips }
   const returnsStats = new Map(); // key -> { itemNumber, name, totalRefund (negative), returnsCount, refunds[] }
   const gasolineStats = new Map(); // station name -> { total, fillUps, totalGallons }
-    let totalSpent = 0;
-    let totalGasSpent = 0;
-    let totalGasGallons = 0;
-    let sumItemAmounts = 0;
-    let totalUnits = 0;
+  const discountedItemStats = new Map(); // key -> { itemNumber, name, timesDiscounted, totalDiscount, discounts[] }
+      let totalSpent = 0;
+      let totalGasSpent = 0;
+      let totalGasGallons = 0;
+      let totalDiscounts = 0;
+      let totalReturned = 0;
+      let sumItemAmounts = 0;
+      let totalUnits = 0;
  
       receipts.forEach((receipt) => {
         const total = Number(receipt.total) || 0;
@@ -569,6 +602,7 @@
         items.forEach((item) => {
           const unit = Number(item.unit) || 0;
           const amount = Number(item.amount) || 0;
+          const rawPerUnitPrice = unit !== 0 ? amount / unit : 0;
 
           // Skip lines without an item number or zero-quantity/zero-amount rows
           if (!item.itemNumber || unit === 0 || amount === 0) return;
@@ -577,10 +611,29 @@
             item.itemNumber + "|" + (item.itemDescription01 || "").trim();
           const name = (item.itemDescription01 || "").trim();
 
-          const perUnitPrice = amount / unit;
-
-          // Purchases (positive units & amounts)
+          // For purchase items, check if there's a discount applied to this item in the same receipt
           if (unit > 0 && amount > 0) {
+            // Find if there's a discount line item referencing this item
+            let discountAmount = 0;
+            items.forEach((discItem) => {
+              const discUnit = Number(discItem.unit) || 0;
+              const discAmount = Number(discItem.amount) || 0;
+              const discDesc = String(discItem.itemDescription01 || "").trim();
+              
+              // Check if this is a discount line: negative amounts with description starting with "/"
+              if (discUnit < 0 && discAmount < 0 && discDesc.startsWith("/")) {
+                const refItemNum = discDesc.substring(1); // Remove leading "/"
+                if (String(item.itemNumber) === refItemNum) {
+                  // This discount applies to the current item
+                  discountAmount += Math.abs(discAmount);
+                }
+              }
+            });
+
+            // Adjust the amount for the purchase by subtracting the discount
+            const adjustedAmount = amount - discountAmount;
+            const adjustedPerUnitPrice = adjustedAmount > 0 ? adjustedAmount / unit : 0;
+
             let stat = itemStats.get(key);
             if (!stat) {
               stat = {
@@ -594,13 +647,13 @@
               itemStats.set(key, stat);
             }
 
-            stat.totalSpent += amount;
+            stat.totalSpent += adjustedAmount;
             stat.totalUnits += unit;
             stat.purchases += unit;
-            stat.prices.push({ date: trxDate, price: perUnitPrice });
+            stat.prices.push({ date: trxDate, price: adjustedPerUnitPrice });
 
             // Keep existing summary metrics based on purchases only
-            sumItemAmounts += amount;
+            sumItemAmounts += adjustedAmount;
             totalUnits += unit;
           }
 
@@ -621,7 +674,41 @@
             r.totalRefund += amount; // amount is negative
             // If unit is zero (some refunds may not include unit), count the transaction as 1
             r.returnsCount += Math.abs(unit) || 1;
-            r.refunds.push({ date: trxDate, amountPerUnit: perUnitPrice });
+            r.refunds.push({ date: trxDate, amountPerUnit: rawPerUnitPrice });
+            
+            // Accumulate total returned (take absolute value of negative refund amount)
+            totalReturned += Math.abs(amount);
+          }
+          
+          // Discounts: detect negative amounts with descriptions starting with "/" (discount line items)
+          else if (unit < 0 && amount < 0 && String(item.itemDescription01 || "").trim().startsWith("/")) {
+            // The discount references the item number in the description
+            // Find the referenced item in this receipt
+            const refItemNum = String(item.itemDescription01 || "").trim().substring(1); // Remove leading "/"
+            const refItem = items.find((it) => String(it.itemNumber) === refItemNum);
+            
+            if (refItem) {
+              const refKey = refItemNum + "|" + (refItem.itemDescription01 || "").trim();
+              const refName = (refItem.itemDescription01 || "").trim();
+              
+              let d = discountedItemStats.get(refKey);
+              if (!d) {
+                d = {
+                  itemNumber: refItemNum,
+                  name: refName,
+                  timesDiscounted: 0,
+                  totalDiscount: 0,
+                  discounts: [],
+                };
+                discountedItemStats.set(refKey, d);
+              }
+              
+              d.timesDiscounted += 1;
+              d.totalDiscount += Math.abs(amount); // discount amount is negative, so take absolute
+              d.discounts.push({ date: trxDate, discountAmount: Math.abs(amount) });
+              
+              totalDiscounts += Math.abs(amount);
+            }
           }
         });
       });
@@ -640,6 +727,7 @@
         warehouseStats,
         returnsStats,
         gasolineStats,
+        discountedItemStats,
         summary: {
           totalSpent,
           totalUnits,
@@ -652,6 +740,8 @@
             totalGasSpent,
             totalGasGallons,
             avgGasPrice: totalGasGallons > 0 ? totalGasSpent / totalGasGallons : 0,
+            totalDiscounts,
+            totalReturned,
         },
       };
     }
@@ -687,6 +777,14 @@
         formatMoney(summary.avgItemPrice);
       document.getElementById("avgPerReceipt").textContent =
         formatMoney(summary.avgPerReceipt);
+      const discEl = document.getElementById("totalDiscounts");
+      if (discEl) {
+        discEl.textContent = formatMoney(summary.totalDiscounts);
+      }
+      const retEl = document.getElementById("totalReturned");
+      if (retEl) {
+        retEl.textContent = formatMoney(summary.totalReturned);
+      }
     }
  
     function renderMostTotalSpent(itemStats) {
@@ -1077,6 +1175,54 @@
             tbody.appendChild(tr);
           });
         }
+
+    function renderDiscountedItems(discountedItemStats) {
+      const tbody = document.getElementById("discountedItemsBody");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      const rows = Array.from(discountedItemStats.values())
+        .map((s) => ({
+          itemNumber: s.itemNumber,
+          name: s.name,
+          timesDiscounted: s.timesDiscounted,
+          totalDiscount: s.totalDiscount,
+          avgDiscount: s.timesDiscounted > 0 ? s.totalDiscount / s.timesDiscounted : 0,
+        }))
+        .sort((a, b) => b.totalDiscount - a.totalDiscount)
+        .slice(0, 10);
+
+      rows.forEach((row, idx) => {
+        const tr = document.createElement("tr");
+
+        const rankTd = document.createElement("td");
+        rankTd.textContent = idx + 1;
+        tr.appendChild(rankTd);
+
+        const itemTd = document.createElement("td");
+        itemTd.innerHTML =
+          "<strong>" + row.name + "</strong><br/><span class='status'>#" +
+          row.itemNumber +
+          "</span>";
+        tr.appendChild(itemTd);
+
+        const timesTd = document.createElement("td");
+        timesTd.textContent = row.timesDiscounted.toLocaleString() + "×";
+        tr.appendChild(timesTd);
+
+        const totalTd = document.createElement("td");
+        totalTd.className = "money pos";
+        totalTd.textContent = formatMoney(row.totalDiscount);
+        tr.appendChild(totalTd);
+
+        const avgTd = document.createElement("td");
+        avgTd.className = "money pos";
+        avgTd.textContent = formatMoney(row.avgDiscount);
+        tr.appendChild(avgTd);
+
+        tbody.appendChild(tr);
+      });
+    }
  
     let timedCharts = {};
  
@@ -1124,13 +1270,14 @@
     }
  
     function handleData(receipts) {
-      const { itemStats, monthlyTotals, yearlyTotals, summary, warehouseStats, returnsStats, gasolineStats } =
+      const { itemStats, monthlyTotals, yearlyTotals, summary, warehouseStats, returnsStats, gasolineStats, discountedItemStats } =
         processReceipts(receipts);
 
       renderSummary(summary);
       if (warehouseStats) renderWarehouseBreakdown(warehouseStats);
       if (returnsStats) renderMostReturned(returnsStats);
       if (gasolineStats) renderGasoline(gasolineStats);
+      if (discountedItemStats) renderDiscountedItems(discountedItemStats);
       renderMostTotalSpent(itemStats);
       renderMostPurchased(itemStats);
       renderMostExpensive(itemStats);
