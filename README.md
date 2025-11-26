@@ -62,8 +62,13 @@ Notes on data requirements
 - If you see parsing errors, ensure the uploaded JSON is an array of receipt objects.
 - If discounts are missing from per-item averages, the dashboard's discount heuristic may not match your dataset. Provide a short sample and I can add rules to detect other discount formats (coupons, receipt-level instant savings distribution, etc).
 - The downloader script uses tokens from local storage and must be run in the browser on the Costco site (see `download_costco_receipts.js`). Use it only on your own account and device.
+- If you have issues running the download_costco_receipts.js all at once (especially when using Safari), run each section of Javascript (there should be 3 sections) individually.
 
 ## Acknowledgements
 Thanks to the authors and resources that inspired or provided parts of this dashboard and tooling:
 
 - [Your list here] — add names, projects, or links you'd like to credit.
+ankurdave - https://github.com/ankurdave/beancount_import_sources/blob/main/download/download_costco_receipts.js
+
+Thanks u/ikeee for the OG report and u/ViKoToMo for the updated version!
+Also thank you to u/webrender for the YouTube video on how to run the Javascript (https://www.youtube.com/watch?v=v0zRaWkQ5lQ)

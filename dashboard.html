@@ -213,6 +213,16 @@
     .neg {
       color: var(--text-main);
     }
+    /* Trend coloring for price changes: up = red, down = green, none = black */
+    .trend-up {
+      color: var(--danger);
+    }
+    .trend-down {
+      color: var(--success);
+    }
+    .trend-none {
+      color: var(--text-main);
+    }
  
     .tag {
       display: inline-flex;
@@ -334,19 +344,43 @@
           </tbody>
         </table>
       </div>
- 
+
       <div class="card">
-        <h2><span class="icon">📈</span>Biggest Price Increases</h2>
-        <p class="subtitle">Items that increased in price the most over time.</p>
+        <h2><span class="icon">🔥</span>Most Purchased Items</h2>
+        <p class="subtitle">By number of units purchased.</p>
         <table>
           <thead>
             <tr>
               <th>#</th>
               <th>Item</th>
+              <th>Times Bought</th>
+              <th>Avg Price</th>
               <th>Min → Max</th>
-              <th>Increase</th>
+              <th>Increase %</th>
+            </tr>
+          </thead>
+          <tbody id="mostPurchasedBody">
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <div class="card">
+        <h2><span class="icon">📈</span>Biggest Price Changes</h2>
+        <p class="subtitle">Items with the largest price swings (increases or decreases).</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>First → Latest (when)</th>
+              <th>Change</th>
+              <th>Lowest (when)</th>
+              <th>Highest (when)</th>
               <th>Period</th>
               <th>Rate / Month</th>
+              <th>Trend</th>
             </tr>
           </thead>
           <tbody id="priceIncreaseBody">
@@ -370,25 +404,6 @@
             </tr>
           </thead>
           <tbody id="mostExpensiveBody">
-          </tbody>
-        </table>
-      </div>
- 
-      <div class="card">
-        <h2><span class="icon">🔥</span>Most Purchased Items</h2>
-        <p class="subtitle">By number of units purchased.</p>
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Item</th>
-              <th>Times Bought</th>
-              <th>Avg Price</th>
-              <th>Min → Max</th>
-              <th>Increase %</th>
-            </tr>
-          </thead>
-          <tbody id="mostPurchasedBody">
           </tbody>
         </table>
       </div>
@@ -602,7 +617,13 @@
         items.forEach((item) => {
           const unit = Number(item.unit) || 0;
           const amount = Number(item.amount) || 0;
-          const rawPerUnitPrice = unit !== 0 ? amount / unit : 0;
+          // Prefer explicit itemUnitPriceAmount when available (downloaded GraphQL field),
+          // otherwise fall back to amount/unit.
+          const rawPerUnitPrice = item.itemUnitPriceAmount
+            ? Number(item.itemUnitPriceAmount)
+            : unit !== 0
+            ? amount / unit
+            : 0;
 
           // Skip lines without an item number or zero-quantity/zero-amount rows
           if (!item.itemNumber || unit === 0 || amount === 0) return;
@@ -634,6 +655,15 @@
             const adjustedAmount = amount - discountAmount;
             const adjustedPerUnitPrice = adjustedAmount > 0 ? adjustedAmount / unit : 0;
 
+            // If the receipt provided an explicit per-unit price (itemUnitPriceAmount),
+            // reduce that reported unit price by the per-unit share of the discount so
+            // price-history (min/max/trend) reflects the true paid unit price.
+            // Keep the unadjusted reported price available for refunds/other uses.
+            const unitPriceForHistory =
+              rawPerUnitPrice && discountAmount > 0 && unit > 0
+                ? Math.max(0, rawPerUnitPrice - discountAmount / unit)
+                : rawPerUnitPrice;
+
             let stat = itemStats.get(key);
             if (!stat) {
               stat = {
@@ -650,7 +680,12 @@
             stat.totalSpent += adjustedAmount;
             stat.totalUnits += unit;
             stat.purchases += unit;
-            stat.prices.push({ date: trxDate, price: adjustedPerUnitPrice });
+            // Store both the adjusted per-unit price (after discounts) and the raw/unit price
+            // reported by the receipt (itemUnitPriceAmount) when available. The price-change
+            // renderer will prefer unitPrice for min/max and trend calculations.
+            // Also keep the raw reported per-unit price so we can show the
+            // non-discounted value when needed.
+            stat.prices.push({ date: trxDate, price: adjustedPerUnitPrice, unitPrice: unitPriceForHistory, rawUnitPrice: rawPerUnitPrice });
 
             // Keep existing summary metrics based on purchases only
             sumItemAmounts += adjustedAmount;
@@ -1051,57 +1086,98 @@
  
     function renderPriceIncreases(itemStats) {
       const tbody = document.getElementById("priceIncreaseBody");
+      if (!tbody) return;
       tbody.innerHTML = "";
- 
+
       const rows = [];
- 
+
       itemStats.forEach((s) => {
         if (s.prices.length < 2) return;
- 
+
+        // sort by date to get earliest and latest
+        const sortedPrices = s.prices.slice().sort((a, b) => a.date - b.date);
+        const firstEntry = sortedPrices[0];
+        const lastEntry = sortedPrices[sortedPrices.length - 1];
+
+        // prefer explicit unitPrice when available, otherwise fall back to stored price
+        const firstPrice = firstEntry
+          ? (firstEntry.unitPrice != null && !isNaN(firstEntry.unitPrice) && firstEntry.unitPrice > 0
+              ? firstEntry.unitPrice
+              : firstEntry.price)
+          : null;
+        const lastPrice = lastEntry
+          ? (lastEntry.unitPrice != null && !isNaN(lastEntry.unitPrice) && lastEntry.unitPrice > 0
+              ? lastEntry.unitPrice
+              : lastEntry.price)
+          : null;
+
+        const firstRaw = firstEntry ? (firstEntry.rawUnitPrice != null ? firstEntry.rawUnitPrice : (firstEntry.price || null)) : null;
+        const lastRaw = lastEntry ? (lastEntry.rawUnitPrice != null ? lastEntry.rawUnitPrice : (lastEntry.price || null)) : null;
+
+        const firstDate = firstEntry ? firstEntry.date : null;
+        const lastDate = lastEntry ? lastEntry.date : null;
+
+        // compute historical min/max (using unitPrice when present, else price)
         let minPrice = Infinity;
         let maxPrice = -Infinity;
         let minDate = null;
         let maxDate = null;
- 
-        s.prices.forEach((p) => {
-          if (p.price < minPrice) {
-            minPrice = p.price;
+
+        sortedPrices.forEach((p) => {
+          const val = p.unitPrice != null && !isNaN(p.unitPrice) && p.unitPrice > 0 ? p.unitPrice : p.price;
+          if (val < minPrice) {
+            minPrice = val;
             minDate = p.date;
           }
-          if (p.price > maxPrice) {
-            maxPrice = p.price;
+          if (val > maxPrice) {
+            maxPrice = val;
             maxDate = p.date;
           }
         });
- 
-        const increase = maxPrice - minPrice;
-        if (increase <= 0.01 || !minDate || !maxDate) return;
- 
+
+        const change = Math.abs(maxPrice - minPrice);
+        if (change <= 0.01 || !minDate || !maxDate) return;
+
         const months = monthsBetween(minDate, maxDate);
         if (months < 0.01) return;
-        if (["155", "712309"].includes(String(s.itemNumber))) return;
- 
+        if (["155", "712309"].includes(String(s.itemNumber))) return; // skip noisy SKUs
+
+        // detect whether earliest/latest were discounted relative to raw reported price
+        const firstDiscounted = firstRaw != null && firstPrice != null && firstPrice < (firstRaw - 0.001);
+        const lastDiscounted = lastRaw != null && lastPrice != null && lastPrice < (lastRaw - 0.001);
+
         rows.push({
           name: s.name,
           itemNumber: s.itemNumber,
           minPrice,
           maxPrice,
-          increase,
+          minDate,
+          maxDate,
+          change,
           months,
-          ratePerMonth: increase / months,
+          ratePerMonth: (maxPrice - minPrice) / months,
+          firstPrice,
+          lastPrice,
+          firstDate,
+          lastDate,
+          firstRaw,
+          lastRaw,
+          firstDiscounted,
+          lastDiscounted,
         });
       });
- 
+
+      // sort by magnitude of change (largest swings first)
       rows
-        .sort((a, b) => b.increase - a.increase)
+        .sort((a, b) => b.change - a.change)
         .slice(0, 10)
         .forEach((row, idx) => {
           const tr = document.createElement("tr");
- 
+
           const rankTd = document.createElement("td");
           rankTd.textContent = idx + 1;
           tr.appendChild(rankTd);
- 
+
           const itemTd = document.createElement("td");
           itemTd.innerHTML =
             "<strong>" +
@@ -1110,34 +1186,91 @@
             row.itemNumber +
             "</span>";
           tr.appendChild(itemTd);
- 
-          const minMaxTd = document.createElement("td");
-          minMaxTd.className = "money";
-          minMaxTd.innerHTML =
-            formatMoney(row.minPrice) +
-            " → " +
-            formatMoney(row.maxPrice);
-          tr.appendChild(minMaxTd);
- 
-          const incTd = document.createElement("td");
-          incTd.className = "money pos";
-          incTd.textContent =
-            "+" + formatMoney(row.increase);
-          tr.appendChild(incTd);
- 
+
+          // First -> Latest (when) — show "*" if discounted and include the raw price in small font
+          const fmt = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' });
+
+          const firstLabel = row.firstDate ? fmt.format(row.firstDate) : '';
+          const lastLabel = row.lastDate ? fmt.format(row.lastDate) : '';
+
+          const firstText = row.firstPrice != null ? formatMoney(row.firstPrice) + (row.firstDiscounted ? '*' : '') : '–';
+          const lastText = row.lastPrice != null ? formatMoney(row.lastPrice) + (row.lastDiscounted ? '*' : '') : '–';
+
+          let firstRawHtml = '';
+          if (row.firstDiscounted && row.firstRaw != null) {
+            firstRawHtml = `<div class='status' style='font-size:0.75rem'>${formatMoney(row.firstRaw)}</div>`;
+          }
+          let lastRawHtml = '';
+          if (row.lastDiscounted && row.lastRaw != null) {
+            lastRawHtml = `<div class='status' style='font-size:0.75rem'>${formatMoney(row.lastRaw)}</div>`;
+          }
+
+          const firstLatestTd = document.createElement("td");
+          firstLatestTd.className = "money";
+          // use innerHTML so we can include the small raw-price line if needed
+          firstLatestTd.innerHTML = `${firstText} ${firstRawHtml} (${firstLabel}) → ${lastText} ${lastRawHtml} (${lastLabel})`;
+          tr.appendChild(firstLatestTd);
+
+          const changeTd = document.createElement("td");
+          changeTd.className = "money";
+          // Show signed change based on earliest -> latest prices when available, fall back to max-min
+          let signedChange = row.change;
+          if (row.firstPrice != null && row.lastPrice != null) {
+            signedChange = row.lastPrice - row.firstPrice;
+          }
+          changeTd.textContent = (signedChange >= 0 ? '+' : '-') + formatMoney(Math.abs(signedChange));
+          tr.appendChild(changeTd);
+
+          // Lowest (when)
+          const minLabel = row.minDate ? fmt.format(row.minDate) : '';
+          const lowestTd = document.createElement("td");
+          lowestTd.className = "money";
+          lowestTd.textContent = `${formatMoney(row.minPrice)} (${minLabel})`;
+          tr.appendChild(lowestTd);
+
+          // Highest (when)
+          const maxLabel = row.maxDate ? fmt.format(row.maxDate) : '';
+          const highestTd = document.createElement("td");
+          highestTd.className = "money";
+          highestTd.textContent = `${formatMoney(row.maxPrice)} (${maxLabel})`;
+          tr.appendChild(highestTd);
+
           const periodTd = document.createElement("td");
-          periodTd.textContent =
-            row.months.toFixed(1) + " months";
+          periodTd.textContent = row.months.toFixed(1) + " months";
           tr.appendChild(periodTd);
- 
+
           const rateTd = document.createElement("td");
-          rateTd.className = "money pos";
-          rateTd.textContent =
-            "+" +
-            formatMoney(row.ratePerMonth) +
-            "/mo";
+          rateTd.className = "money";
+          // signed rate per month based on earliest->latest when possible
+          let signedRate = row.ratePerMonth;
+          if (row.firstPrice != null && row.lastPrice != null) {
+            signedRate = (row.lastPrice - row.firstPrice) / row.months;
+          }
+          rateTd.textContent = (signedRate >= 0 ? '+' : '-') + formatMoney(Math.abs(signedRate)) + "/mo";
           tr.appendChild(rateTd);
- 
+
+          const trendTd = document.createElement("td");
+          if (row.firstPrice == null || row.lastPrice == null) {
+            trendTd.className = 'trend-none';
+            trendTd.textContent = '—';
+            trendTd.title = 'No data';
+          } else if (row.lastPrice > row.firstPrice) {
+            // Increasing price = red
+            trendTd.className = 'trend-up';
+            trendTd.textContent = '▲';
+            trendTd.title = 'Price increased (worse)';
+          } else if (row.lastPrice < row.firstPrice) {
+            // Decreasing price = green
+            trendTd.className = 'trend-down';
+            trendTd.textContent = '▼';
+            trendTd.title = 'Price decreased (better)';
+          } else {
+            trendTd.className = 'trend-none';
+            trendTd.textContent = '—';
+            trendTd.title = 'No change';
+          }
+          tr.appendChild(trendTd);
+
           tbody.appendChild(tr);
         });
     }
