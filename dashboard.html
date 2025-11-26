@@ -416,6 +416,26 @@
       </div>
     </section>
 
+    <section class="grid-2">
+      <div class="card">
+        <h2><span class="icon">⛽</span>Gasoline Purchases</h2>
+        <p class="subtitle">Total spent and number of fill-ups per gas station.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Gas Station</th>
+              <th>Fill-ups</th>
+              <th>Total Spent</th>
+              <th>Avg per Fill-up</th>
+            </tr>
+          </thead>
+          <tbody id="gasolineBody">
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="card">
       <h2><span class="icon">📊</span>Monthly Spending Trend</h2>
       <p class="subtitle">Total spent per month.</p>
@@ -457,6 +477,7 @@
   const warehouses = new Set(); // collect unique warehouse names
   const warehouseStats = new Map(); // label -> { total, trips }
   const returnsStats = new Map(); // key -> { itemNumber, name, totalRefund (negative), returnsCount, refunds[] }
+  const gasolineStats = new Map(); // station name -> { total, fillUps }
       let totalSpent = 0;
       let sumItemAmounts = 0;
       let totalUnits = 0;
@@ -485,7 +506,7 @@
         const whRaw =
           receipt.warehouseName || receipt.warehouse || receipt.storeName || receipt.store || "";
         const whNum = receipt.warehouseNumber || receipt.storeNumber || null;
-        let whLabel = (whRaw && String(whRaw).trim()) || "";
+        let whLabel = (whRaw && String(whRaw).trim().toUpperCase()) || "";
         if (whLabel && whNum) {
           whLabel = `${whLabel} (#${whNum})`;
         } else if (!whLabel && whNum) {
@@ -499,6 +520,18 @@
         ws.total += total;
         ws.trips += 1;
         warehouseStats.set(whLabel, ws);
+
+        // Track gasoline purchases (FuelReceipts or Gas Station receiptType)
+        const isGasPurchase = 
+          receipt.documentType === 'FuelReceipts' || 
+          receipt.receiptType === 'Gas Station';
+        if (isGasPurchase) {
+          const stationName = whLabel;
+          const gs = gasolineStats.get(stationName) || { total: 0, fillUps: 0 };
+          gs.total += total;
+          gs.fillUps += 1;
+          gasolineStats.set(stationName, gs);
+        }
 
         const items = Array.isArray(receipt.itemArray)
           ? receipt.itemArray
@@ -583,6 +616,7 @@
         yearlyTotals,
         warehouseStats,
         returnsStats,
+        gasolineStats,
         summary: {
           totalSpent,
           totalUnits,
@@ -702,6 +736,49 @@
         const avgTd = document.createElement("td");
         avgTd.className = "money neg";
         avgTd.textContent = formatMoney(row.avgRefund);
+        tr.appendChild(avgTd);
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderGasoline(gasolineStats) {
+      const tbody = document.getElementById("gasolineBody");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      const rows = Array.from(gasolineStats.entries())
+        .map(([name, s]) => ({ 
+          name, 
+          fillUps: s.fillUps, 
+          total: s.total,
+          avgPerFillUp: s.fillUps > 0 ? s.total / s.fillUps : 0
+        }))
+        .sort((a, b) => b.total - a.total);
+
+      rows.forEach((row, idx) => {
+        const tr = document.createElement("tr");
+
+        const rankTd = document.createElement("td");
+        rankTd.textContent = idx + 1;
+        tr.appendChild(rankTd);
+
+        const nameTd = document.createElement("td");
+        nameTd.textContent = row.name;
+        tr.appendChild(nameTd);
+
+        const fillUpsTd = document.createElement("td");
+        fillUpsTd.textContent = row.fillUps.toLocaleString();
+        tr.appendChild(fillUpsTd);
+
+        const totalTd = document.createElement("td");
+        totalTd.className = "money";
+        totalTd.textContent = formatMoney(row.total);
+        tr.appendChild(totalTd);
+
+        const avgTd = document.createElement("td");
+        avgTd.className = "money";
+        avgTd.textContent = formatMoney(row.avgPerFillUp);
         tr.appendChild(avgTd);
 
         tbody.appendChild(tr);
@@ -997,12 +1074,13 @@
     }
  
     function handleData(receipts) {
-      const { itemStats, monthlyTotals, yearlyTotals, summary, warehouseStats, returnsStats } =
+      const { itemStats, monthlyTotals, yearlyTotals, summary, warehouseStats, returnsStats, gasolineStats } =
         processReceipts(receipts);
 
       renderSummary(summary);
       if (warehouseStats) renderWarehouseBreakdown(warehouseStats);
       if (returnsStats) renderMostReturned(returnsStats);
+      if (gasolineStats) renderGasoline(gasolineStats);
       renderMostTotalSpent(itemStats);
       renderMostPurchased(itemStats);
       renderMostExpensive(itemStats);
