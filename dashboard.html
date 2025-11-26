@@ -310,7 +310,7 @@
         <div class="sub">Distinct warehouses visited</div>
       </div>
       <div class="summary-card">
-        <div class="label">Receipts</div>
+        <div class="label">Total Receipts</div>
         <div class="value" id="receiptCount">–</div>
         <div class="sub">Number of shopping trips</div>
       </div>
@@ -335,9 +335,9 @@
         <div class="sub">Average spend per trip</div>
       </div>
       <div class="summary-card">
-        <div class="label">Total Discounts</div>
-        <div class="value" id="totalDiscounts">–</div>
-        <div class="sub">Total amount saved</div>
+        <div class="label">Total Instant Savings</div>
+        <div class="value" id="totalInstantSavings">–</div>
+        <div class="sub">Receipt-level instant savings</div>
       </div>
       <div class="summary-card">
         <div class="label">Total Returned</div>
@@ -519,6 +519,7 @@
               <th>Total Spent</th>
               <th>Trips</th>
               <th>Avg Items/Trip</th>
+              <th>Avg Instant Savings/Trip</th>
               <th>Preferred Warehouse</th>
               <th>Gas Trips</th>
               <th>Preferred Gas Station</th>
@@ -814,6 +815,7 @@
       let totalGasSpent = 0;
       let totalGasGallons = 0;
       let totalDiscounts = 0;
+      let totalInstantSavings = 0;
       let totalReturned = 0;
       let sumItemAmounts = 0;
       const warehousesSet = new Set();
@@ -835,6 +837,7 @@
         memberSeenReceipts.add(receiptKey);
         
         totalSpent += total;
+        totalInstantSavings += Number(receipt.instantSavings || 0);
         
         // Warehouse tracking
         const whRaw = receipt.warehouseName || receipt.warehouse || receipt.storeName || receipt.store || "";
@@ -927,6 +930,7 @@
         avgItemPrice,
         avgPerReceipt,
         totalDiscounts,
+        totalInstantSavings,
         totalReturned,
       };
     }
@@ -1019,6 +1023,7 @@
       let totalGasSpent = 0;
       let totalGasGallons = 0;
       let totalDiscounts = 0;
+      let totalInstantSavings = 0;
       let totalReturned = 0;
       let sumItemAmounts = 0;
       let totalUnits = 0;
@@ -1026,6 +1031,7 @@
       receipts.forEach((receipt) => {
         const total = Number(receipt.total) || 0;
         totalSpent += total;
+        totalInstantSavings += Number(receipt.instantSavings || 0);
         const membershipNumber = receipt.membershipNumber ? String(receipt.membershipNumber) : null;
 
         const monthKey = (receipt.transactionDate || "").slice(0, 7); // YYYY-MM
@@ -1132,6 +1138,7 @@
               totalSpent: 0,
               trips: 0,
               totalItems: 0,
+              totalInstantSavings: 0,
               warehouseCounts: new Map(),
               gasStationCounts: new Map(),
               gasTrips: 0,
@@ -1141,6 +1148,7 @@
           ms.totalSpent += total;
           ms.trips += 1;
           ms.totalItems += Number(receipt.totalItemCount || 0);
+          ms.totalInstantSavings += Number(receipt.instantSavings || 0);
           // track preferred warehouse by visit counts
           ms.warehouseCounts.set(whLabel, (ms.warehouseCounts.get(whLabel) || 0) + 1);
           // track gas trips and preferred gas station when applicable
@@ -1326,6 +1334,7 @@
             totalGasGallons,
             avgGasPrice: totalGasGallons > 0 ? totalGasSpent / totalGasGallons : 0,
             totalDiscounts,
+            totalInstantSavings,
             totalReturned,
         },
       };
@@ -1367,9 +1376,9 @@
         formatMoney(summary.avgItemPrice);
       document.getElementById("avgPerReceipt").textContent =
         formatMoney(summary.avgPerReceipt);
-      const discEl = document.getElementById("totalDiscounts");
-      if (discEl) {
-        discEl.textContent = formatMoney(summary.totalDiscounts);
+      const instEl = document.getElementById("totalInstantSavings");
+      if (instEl) {
+        instEl.textContent = formatMoney(summary.totalInstantSavings || 0);
       }
       const retEl = document.getElementById("totalReturned");
       if (retEl) {
@@ -1576,6 +1585,7 @@
             totalSpent: m.totalSpent,
             trips: m.trips,
             avgItems: m.trips > 0 ? m.totalItems / m.trips : 0,
+            avgInstantSavings: m.trips > 0 ? m.totalInstantSavings / m.trips : 0,
             preferredWarehouse: prefWh,
             gasTrips: m.gasTrips,
             preferredGas: prefGas,
@@ -1591,6 +1601,7 @@
           <td class="money">${formatMoney(row.totalSpent)}</td>
           <td>${row.trips.toLocaleString()}</td>
           <td>${row.avgItems.toFixed(2)}</td>
+          <td class="money">${formatMoney(row.avgInstantSavings)}</td>
           <td>${row.preferredWarehouse}</td>
           <td>${row.gasTrips.toLocaleString()}</td>
           <td>${row.preferredGas}</td>
