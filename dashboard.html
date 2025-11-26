@@ -498,6 +498,29 @@
       </div>
     </section>
 
+    <section class="grid-2">
+      <div class="card">
+        <h2><span class="icon">👤</span>Member Stats</h2>
+        <p class="subtitle">Totals and preferences by membership number.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Member #</th>
+              <th>Total Spent</th>
+              <th>Trips</th>
+              <th>Avg Items/Trip</th>
+              <th>Preferred Warehouse</th>
+              <th>Gas Trips</th>
+              <th>Preferred Gas Station</th>
+            </tr>
+          </thead>
+          <tbody id="memberStatsBody">
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="card">
       <h2><span class="icon">📊</span>Monthly Spending Trend</h2>
       <p class="subtitle">Total spent per month.</p>
@@ -546,6 +569,8 @@
   const returnsStats = new Map(); // key -> { itemNumber, name, totalRefund (negative), returnsCount, refunds[] }
   const gasolineStats = new Map(); // station name -> { total, fillUps, totalGallons }
   const discountedItemStats = new Map(); // key -> { itemNumber, name, timesDiscounted, totalDiscount, discounts[] }
+  const memberStats = new Map(); // membershipNumber -> { membershipNumber, totalSpent, trips, totalItems, warehouseCounts: Map, gasStationCounts: Map, gasTrips }
+  const memberSeenReceipts = new Map(); // membershipNumber -> Set(receipt unique keys)
       let totalSpent = 0;
       let totalGasSpent = 0;
       let totalGasGallons = 0;
@@ -622,6 +647,50 @@
 
           totalGasSpent += total;
           totalGasGallons += stationGallons;
+        }
+
+        // Aggregate member stats (for both In-Warehouse and Gas Station when membershipNumber is present)
+        const membershipNumber = receipt.membershipNumber ? String(receipt.membershipNumber) : null;
+        if (membershipNumber) {
+          // Build a unique key per receipt to avoid double-counting if duplicates exist
+          const receiptKey = String(
+            receipt.transactionBarcode ||
+            `${receipt.transactionDate || ''}-${receipt.transactionNumber || ''}-${receipt.sequenceNumber || ''}`
+          );
+          let seen = memberSeenReceipts.get(membershipNumber);
+          if (!seen) {
+            seen = new Set();
+            memberSeenReceipts.set(membershipNumber, seen);
+          }
+          if (seen.has(receiptKey)) {
+            // Skip duplicate for this member
+          } else {
+            seen.add(receiptKey);
+
+          let ms = memberStats.get(membershipNumber);
+          if (!ms) {
+            ms = {
+              membershipNumber,
+              totalSpent: 0,
+              trips: 0,
+              totalItems: 0,
+              warehouseCounts: new Map(),
+              gasStationCounts: new Map(),
+              gasTrips: 0,
+            };
+            memberStats.set(membershipNumber, ms);
+          }
+          ms.totalSpent += total;
+          ms.trips += 1;
+          ms.totalItems += Number(receipt.totalItemCount || 0);
+          // track preferred warehouse by visit counts
+          ms.warehouseCounts.set(whLabel, (ms.warehouseCounts.get(whLabel) || 0) + 1);
+          // track gas trips and preferred gas station when applicable
+          if (isGasPurchase) {
+            ms.gasTrips += 1;
+            ms.gasStationCounts.set(whLabel, (ms.gasStationCounts.get(whLabel) || 0) + 1);
+          }
+          }
         }
 
         items.forEach((item) => {
@@ -773,6 +842,7 @@
         returnsStats,
         gasolineStats,
         discountedItemStats,
+        memberStats,
         summary: {
           totalSpent,
           totalUnits,
@@ -974,6 +1044,67 @@
   avgGallonTd.textContent = formatMoney(row.avgPerGallon);
   tr.appendChild(avgGallonTd);
 
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderMemberStats(memberStats) {
+      const tbody = document.getElementById("memberStatsBody");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      const rows = Array.from(memberStats.values())
+        .map((m) => {
+          // Preferred warehouse: most trips (minimum 3 trips required)
+          let prefWh = "No Preference";
+          let prefWhTrips = 0;
+          m.warehouseCounts.forEach((count, wh) => {
+            if (count > prefWhTrips) {
+              prefWh = wh;
+              prefWhTrips = count;
+            }
+          });
+          if (prefWhTrips < 3) {
+            prefWh = "No Preference";
+          }
+          
+          // Preferred gas station: most gas trips (minimum 3 trips required)
+          let prefGas = "No Preference";
+          let prefGasTrips = 0;
+          m.gasStationCounts.forEach((count, gs) => {
+            if (count > prefGasTrips) {
+              prefGas = gs;
+              prefGasTrips = count;
+            }
+          });
+          if (prefGasTrips < 3) {
+            prefGas = "No Preference";
+          }
+          
+          return {
+            membershipNumber: m.membershipNumber,
+            totalSpent: m.totalSpent,
+            trips: m.trips,
+            avgItems: m.trips > 0 ? m.totalItems / m.trips : 0,
+            preferredWarehouse: prefWh,
+            gasTrips: m.gasTrips,
+            preferredGas: prefGas,
+          };
+        })
+        .sort((a, b) => b.totalSpent - a.totalSpent);
+
+      rows.forEach((row, idx) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${row.membershipNumber}</td>
+          <td class="money">${formatMoney(row.totalSpent)}</td>
+          <td>${row.trips.toLocaleString()}</td>
+          <td>${row.avgItems.toFixed(2)}</td>
+          <td>${row.preferredWarehouse}</td>
+          <td>${row.gasTrips.toLocaleString()}</td>
+          <td>${row.preferredGas}</td>
+        `;
         tbody.appendChild(tr);
       });
     }
@@ -1450,14 +1581,15 @@
     }
  
     function handleData(receipts) {
-      const { itemStats, monthlyTotals, yearlyTotals, summary, warehouseStats, returnsStats, gasolineStats, discountedItemStats } =
+      const { itemStats, monthlyTotals, yearlyTotals, summary, warehouseStats, returnsStats, gasolineStats, discountedItemStats, memberStats } =
         processReceipts(receipts);
 
       renderSummary(summary);
       if (warehouseStats) renderWarehouseBreakdown(warehouseStats);
       if (returnsStats) renderMostReturned(returnsStats);
       if (gasolineStats) renderGasoline(gasolineStats);
-      if (discountedItemStats) renderDiscountedItems(discountedItemStats);
+  if (discountedItemStats) renderDiscountedItems(discountedItemStats);
+  if (memberStats) renderMemberStats(memberStats);
       renderMostTotalSpent(itemStats);
       renderMostPurchased(itemStats);
       renderMostExpensive(itemStats);
