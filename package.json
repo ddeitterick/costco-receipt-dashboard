@@ -1,0 +1,13 @@
+{
+  "name": "costco-receipt-dashboard",
+  "version": "1.0.0",
+  "description": "A browser dashboard to analyze Costco receipt JSON exports, with optional server-side persistence.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "BSD-2-Clause",
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

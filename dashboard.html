@@ -2189,39 +2189,13 @@
               // Deduplicate and add to accumulated receipts
               const uniqueNewReceipts = deduplicateReceipts(allNewReceipts);
               accumulatedReceipts.push(...uniqueNewReceipts);
-              
-              // Extract date range from all accumulated receipts
-              let minDate = null;
-              let maxDate = null;
-              accumulatedReceipts.forEach((receipt) => {
-                const dateStr = receipt.transactionDate || receipt.transactionDateTime;
-                if (dateStr) {
-                  const date = new Date(dateStr);
-                  if (!minDate || date < minDate) minDate = date;
-                  if (!maxDate || date > maxDate) maxDate = date;
-                }
-              });
-              
-              let dateRangeText = "";
-              if (minDate && maxDate) {
-                const formatter = new Intl.DateTimeFormat("en-US", {
-                  year: "numeric",
-                  month: "short",
-                  day: "numeric",
-                });
-                dateRangeText = ` • ${formatter.format(minDate)} to ${formatter.format(maxDate)}`;
-              }
-              
+
               const duplicatesCount = allNewReceipts.length - uniqueNewReceipts.length;
-              let duplicateText = "";
-              if (duplicatesCount > 0) {
-                duplicateText = ` (${duplicatesCount.toLocaleString()} duplicates removed)`;
-              }
-              
-              statusEl.textContent = `Loaded ${accumulatedReceipts.length.toLocaleString()} total receipts.${dateRangeText}${duplicateText}`;
-              statusEl.classList.remove("error");
-              handleData(accumulatedReceipts);
-              
+              renderAccumulatedReceipts(duplicatesCount);
+
+              // Persist the newly added receipts to the server (if available).
+              persistReceipts(uniqueNewReceipts);
+
               // Clear file input so uploading the same files again works
               document.getElementById("fileInput").value = "";
             }
@@ -2229,6 +2203,75 @@
           reader.readAsText(file);
         });
       });
+
+    // Compute the date range / status line and (re)render the dashboard from
+    // the current accumulatedReceipts. Shared by uploads and server load.
+    function renderAccumulatedReceipts(duplicatesCount = 0) {
+      const statusEl = document.getElementById("status");
+
+      let minDate = null;
+      let maxDate = null;
+      accumulatedReceipts.forEach((receipt) => {
+        const dateStr = receipt.transactionDate || receipt.transactionDateTime;
+        if (dateStr) {
+          const date = new Date(dateStr);
+          if (!minDate || date < minDate) minDate = date;
+          if (!maxDate || date > maxDate) maxDate = date;
+        }
+      });
+
+      let dateRangeText = "";
+      if (minDate && maxDate) {
+        const formatter = new Intl.DateTimeFormat("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        });
+        dateRangeText = ` • ${formatter.format(minDate)} to ${formatter.format(maxDate)}`;
+      }
+
+      let duplicateText = "";
+      if (duplicatesCount > 0) {
+        duplicateText = ` (${duplicatesCount.toLocaleString()} duplicates removed)`;
+      }
+
+      statusEl.textContent = `Loaded ${accumulatedReceipts.length.toLocaleString()} total receipts.${dateRangeText}${duplicateText}`;
+      statusEl.classList.remove("error");
+      handleData(accumulatedReceipts);
+    }
+
+    // Save newly added receipts to the backend so they survive page reloads.
+    // Fails silently when no server is present (e.g. opening the file directly).
+    async function persistReceipts(receipts) {
+      if (!receipts || receipts.length === 0) return;
+      try {
+        await fetch("/api/receipts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(receipts),
+        });
+      } catch (err) {
+        console.warn("Could not persist receipts to server:", err.message);
+      }
+    }
+
+    // On page load, pull any previously stored receipts from the backend.
+    async function loadStoredReceipts() {
+      try {
+        const res = await fetch("/api/receipts");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && Array.isArray(data.receipts) && data.receipts.length > 0) {
+          accumulatedReceipts = data.receipts;
+          renderAccumulatedReceipts();
+        }
+      } catch (err) {
+        // No server available (opened as a static file) — that's fine.
+        console.info("No server storage available; upload a file to begin.");
+      }
+    }
+
+    loadStoredReceipts();
   </script>
 </body>
 </html>

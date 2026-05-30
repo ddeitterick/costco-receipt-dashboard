@@ -1,0 +1,9 @@
+# Dependencies
+node_modules/
+
+# Persisted receipt data (don't commit personal receipts)
+data/
+
+# Logs
+*.log
+npm-debug.log*

@@ -14,12 +14,54 @@ A small, single-file browser dashboard to analyze Costco receipt JSON exports. D
 
 ## Quick start
 1. Open `dashboard.html` in a browser (double-click the file or use a local static server).
+   - Opened this way the dashboard is fully client-side and does **not** persist data between page loads. To keep your uploads, run the optional server (see below).
 2. Option A — Use the included downloader snippet to fetch receipts from the Costco site:
 	- Open the browser console on https://www.costco.com/OrderStatusCmd and paste the contents of `download_costco_receipts.js` (the snippet is documented at the top of that file). It will download a JSON file containing your receipts.
 3. Option B — Upload receipts JSON file(s) using the `Receipts JSON` file input near the top of the dashboard:
 	- You can upload multiple files at once (useful for household receipts from multiple members).
 	- The dashboard automatically deduplicates receipts to prevent double-counting if you upload the same file multiple times.
 4. The page will parse the file(s), show a status line with the total number of receipts and the date range, and populate all cards/tables.
+
+## Persistent storage (optional server)
+By default the dashboard runs entirely in the browser and forgets your data on refresh. To save uploaded receipts so they are reloaded automatically on every page load, run the included Node.js server. Uploaded files are merged and deduplicated into a single dataset stored on disk (`data/receipts.json`).
+
+### Run with Node.js
+1. Install [Node.js](https://nodejs.org/) (v18+).
+2. Install dependencies and start the server:
+   ```sh
+   npm install
+   npm start
+   ```
+3. Open http://localhost:3000 in your browser.
+4. Upload receipts as usual. They are saved server-side and will load automatically the next time you open the page.
+
+Environment variables:
+- `PORT` — port to listen on (default `3000`).
+- `DATA_DIR` — directory where `receipts.json` is stored (default `./data`).
+
+API endpoints (used by the dashboard, but available for scripting):
+- `GET /api/receipts` — return the stored receipts (`{ "receipts": [...] }`).
+- `POST /api/receipts` — body is an array of receipts; merges + dedupes + persists.
+- `DELETE /api/receipts` — clears all stored receipts.
+
+### Run with Docker
+Build and run the container, mounting a volume so your data persists:
+```sh
+docker build -t costco-receipt-dashboard .
+docker run -p 3000:3000 -v costco-data:/app/data costco-receipt-dashboard
+```
+
+Or use Docker Compose:
+```sh
+docker compose up -d
+```
+Then open http://localhost:3000. The `data` volume keeps your receipts between container restarts.
+
+### Prebuilt image (GitHub Container Registry)
+Every push to `main` builds and publishes a container image via GitHub Actions. Once published you can run it directly:
+```sh
+docker run -p 3000:3000 -v costco-data:/app/data ghcr.io/ddeitterick/costco-receipt-dashboard:latest
+```
 
 Notes on data requirements
 - The dashboard expects an array of receipt objects (the shape returned by the GraphQL snippet included). If your JSON uses a different shape, transform it to an array of receipts before loading.
