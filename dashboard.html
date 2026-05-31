@@ -578,24 +578,50 @@
       // Create a composite key that identifies a unique receipt
       return `${date}|${amount}|${memberId}|${itemCount}`;
     }
+
+    // Total fuel gallons recorded on a receipt's line items.
+    function receiptFuelGallons(receipt) {
+      const items = Array.isArray(receipt.itemArray) ? receipt.itemArray : [];
+      return items.reduce((acc, it) => acc + (Number(it.fuelUnitQuantity) || 0), 0);
+    }
+
+    // Some Costco exports contain the same receipt twice: an older copy whose
+    // fuel line lacks `fuelUnitQuantity` and a newer copy that includes it.
+    // Both share the same dedupe key, so prefer the copy that actually carries
+    // fuel gallon data instead of dropping it as a duplicate.
+    function isMoreDetailedReceipt(incoming, existing) {
+      return receiptFuelGallons(incoming) > 0 && receiptFuelGallons(existing) === 0;
+    }
     
-    // Deduplicate receipts based on transaction date, amount, member, and item count
+    // Deduplicate receipts based on transaction date, amount, member, and item
+    // count. Returns the genuinely new receipts to append, plus any existing
+    // receipts that were upgraded in place to a more detailed copy.
     function deduplicateReceipts(newReceipts) {
-      const existingKeys = new Set();
-      accumulatedReceipts.forEach(receipt => {
-        existingKeys.add(getReceiptKey(receipt));
+      // Track where each key lives so duplicates can be upgraded in place,
+      // whether the existing copy is already accumulated or new in this batch.
+      const indexByKey = new Map();
+      accumulatedReceipts.forEach((receipt, idx) => {
+        indexByKey.set(getReceiptKey(receipt), { list: accumulatedReceipts, idx });
       });
-      
+
       const uniqueNewReceipts = [];
+      const upgradedReceipts = [];
       newReceipts.forEach(receipt => {
         const key = getReceiptKey(receipt);
-        if (!existingKeys.has(key)) {
+        const existing = indexByKey.get(key);
+        if (!existing) {
           uniqueNewReceipts.push(receipt);
-          existingKeys.add(key);
+          indexByKey.set(key, { list: uniqueNewReceipts, idx: uniqueNewReceipts.length - 1 });
+        } else if (isMoreDetailedReceipt(receipt, existing.list[existing.idx])) {
+          // Same receipt, but this copy has richer fuel data — keep the better one.
+          existing.list[existing.idx] = receipt;
+          if (existing.list === accumulatedReceipts) {
+            upgradedReceipts.push(receipt);
+          }
         }
       });
-      
-      return uniqueNewReceipts;
+
+      return { added: uniqueNewReceipts, upgraded: upgradedReceipts };
     }
 
     function monthsBetween(d1, d2) {
@@ -2181,15 +2207,17 @@
             filesProcessed++;
             // Process all files before updating the display
             if (filesProcessed === files.length && !hasError) {
-              // Deduplicate and add to accumulated receipts
-              const uniqueNewReceipts = deduplicateReceipts(allNewReceipts);
-              accumulatedReceipts.push(...uniqueNewReceipts);
+              // Deduplicate and add to accumulated receipts. Duplicates that
+              // carry richer fuel data upgrade the stored copy in place.
+              const { added, upgraded } = deduplicateReceipts(allNewReceipts);
+              accumulatedReceipts.push(...added);
 
-              const duplicatesCount = allNewReceipts.length - uniqueNewReceipts.length;
+              const duplicatesCount = allNewReceipts.length - added.length;
               renderAccumulatedReceipts(duplicatesCount);
 
-              // Persist the newly added receipts to the server (if available).
-              persistReceipts(uniqueNewReceipts);
+              // Persist the newly added receipts (and any upgraded copies) to
+              // the server (if available).
+              persistReceipts([...added, ...upgraded]);
 
               // Clear file input so uploading the same files again works
               document.getElementById("fileInput").value = "";

@@ -61,6 +61,19 @@ function getReceiptKey(receipt) {
   return `${date}|${amount}|${memberId}|${itemCount}`;
 }
 
+// Total fuel gallons recorded on a receipt's line items.
+function receiptFuelGallons(receipt) {
+  const items = Array.isArray(receipt.itemArray) ? receipt.itemArray : [];
+  return items.reduce((acc, it) => acc + (Number(it.fuelUnitQuantity) || 0), 0);
+}
+
+// Some Costco exports contain the same receipt twice: an older copy whose fuel
+// line lacks `fuelUnitQuantity` and a newer copy that includes it. Both share
+// the same dedupe key, so prefer the copy that carries fuel gallon data.
+function isMoreDetailedReceipt(incoming, existing) {
+  return receiptFuelGallons(incoming) > 0 && receiptFuelGallons(existing) === 0;
+}
+
 // --- API routes ------------------------------------------------------------
 
 app.get("/api/receipts", (req, res) => {
@@ -76,16 +89,26 @@ app.post("/api/receipts", (req, res) => {
   }
 
   const existing = readReceipts();
-  const keys = new Set(existing.map(getReceiptKey));
+  const indexByKey = new Map();
+  existing.forEach((receipt, idx) => {
+    indexByKey.set(getReceiptKey(receipt), idx);
+  });
 
   let added = 0;
   let duplicates = 0;
+  let upgraded = 0;
   incoming.forEach((receipt) => {
     const key = getReceiptKey(receipt);
-    if (keys.has(key)) {
+    if (indexByKey.has(key)) {
+      const idx = indexByKey.get(key);
+      // Replace the stored copy when this duplicate carries richer fuel data.
+      if (isMoreDetailedReceipt(receipt, existing[idx])) {
+        existing[idx] = receipt;
+        upgraded++;
+      }
       duplicates++;
     } else {
-      keys.add(key);
+      indexByKey.set(key, existing.length);
       existing.push(receipt);
       added++;
     }
@@ -97,6 +120,7 @@ app.post("/api/receipts", (req, res) => {
     receipts: existing,
     added,
     duplicates,
+    upgraded,
     total: existing.length,
   });
 });
