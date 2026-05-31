@@ -718,10 +718,7 @@
           const stationName = whLabel;
           const items = Array.isArray(receipt.itemArray) ? receipt.itemArray : [];
           const stationGallons = items.reduce(
-            (acc, it) => {
-              const hasFuelMarker = it.fuelGradeCode || it.fuelUomCode;
-              return acc + (hasFuelMarker ? (Number(it.fuelUnitQuantity) || 0) : 0);
-            },
+            (acc, it) => acc + (Number(it.fuelUnitQuantity) || 0),
             0
           );
           
@@ -855,10 +852,10 @@
         const isGasPurchase = receipt.documentType === 'FuelReceipts' || receipt.receiptType === 'Gas Station';
         if (isGasPurchase) {
           const items = Array.isArray(receipt.itemArray) ? receipt.itemArray : [];
-          const stationGallons = items.reduce((acc, it) => {
-            const hasFuelMarker = it.fuelGradeCode || it.fuelUomCode;
-            return acc + (hasFuelMarker ? (Number(it.fuelUnitQuantity) || 0) : 0);
-          }, 0);
+          const stationGallons = items.reduce(
+            (acc, it) => acc + (Number(it.fuelUnitQuantity) || 0),
+            0
+          );
           totalGasSpent += total;
           totalGasGallons += stationGallons;
         }
@@ -1092,13 +1089,11 @@
           receipt.receiptType === 'Gas Station';
         if (isGasPurchase) {
           const stationName = whLabel;
-          // Sum fuel unit quantities from item lines for this receipt
-          // Only count items that have fuel markers (fuelGradeCode or fuelUomCode)
+          // Sum fuel unit quantities from item lines for this receipt.
+          // fuelUnitQuantity only appears on fuel line items, so summing it
+          // directly is reliable even when fuelGradeCode/fuelUomCode are absent.
           const stationGallons = items.reduce(
-            (acc, it) => {
-              const hasFuelMarker = it.fuelGradeCode || it.fuelUomCode;
-              return acc + (hasFuelMarker ? (Number(it.fuelUnitQuantity) || 0) : 0);
-            },
+            (acc, it) => acc + (Number(it.fuelUnitQuantity) || 0),
             0
           );
           const gs = gasolineStats.get(stationName) || { total: 0, fillUps: 0, totalGallons: 0, membershipNumbers: new Set() };
