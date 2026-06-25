@@ -425,11 +425,11 @@
             <a href="https://www.costco.com/OrderStatusCmd" target="_blank" rel="noopener">costco.com</a>
             and open the browser developer console (F12 &rarr; Console).
           </li>
-          <li>Paste the snippet below and press Enter. It prints your login tokens (and copies them to the clipboard where supported).</li>
-          <li>Come back here, paste into the box, and click <strong>Sync now</strong>.</li>
+          <li>Paste the snippet below and press Enter. The console shows your tokens as its result (it may also copy them to the clipboard).</li>
+          <li>Copy that result &mdash; surrounding quotes or backslashes are fine &mdash; paste it into the box, and click <strong>Sync now</strong>.</li>
         </ol>
         <div class="sync-snippet">
-          <code id="syncSnippet">(function(){var i=localStorage.getItem('idToken'),c=localStorage.getItem('clientID');if(!i||!c){console.warn('Costco tokens not found \u2014 make sure you are logged in at costco.com.');}var t=JSON.stringify({idToken:i,clientID:c});console.log(t);try{copy(t)}catch(e){}})()</code>
+          <code id="syncSnippet">(function(){var t=JSON.stringify({idToken:localStorage.getItem('idToken'),clientID:localStorage.getItem('clientID')});try{copy(t)}catch(e){}return t;})()</code>
           <button type="button" class="sync-btn secondary" id="copySnippetBtn">Copy snippet</button>
         </div>
         <textarea
