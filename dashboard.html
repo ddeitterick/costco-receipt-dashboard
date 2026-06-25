@@ -429,7 +429,7 @@
           <li>Copy that result &mdash; surrounding quotes or backslashes are fine &mdash; paste it into the box, and click <strong>Sync now</strong>.</li>
         </ol>
         <div class="sync-snippet">
-          <code id="syncSnippet">(function(){var t=JSON.stringify({idToken:localStorage.getItem('idToken'),clientID:localStorage.getItem('clientID')});try{copy(t)}catch(e){}return t;})()</code>
+          <code id="syncSnippet">(function(){var t=JSON.stringify({idToken:localStorage.getItem('idToken'),clientID:localStorage.getItem('clientID'),cookie:document.cookie});try{copy(t)}catch(e){}return t;})()</code>
           <button type="button" class="sync-btn secondary" id="copySnippetBtn">Copy snippet</button>
         </div>
         <textarea
@@ -2510,7 +2510,7 @@
       if (!idToken || !clientID) {
         throw new Error("The pasted tokens are missing idToken or clientID. Make sure you're logged in at costco.com.");
       }
-      return { idToken, clientID };
+      return { idToken, clientID, cookie: parsed.cookie || "" };
     }
 
     document.getElementById("syncBtn").addEventListener("click", async () => {

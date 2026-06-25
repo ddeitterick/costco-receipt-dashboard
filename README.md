@@ -33,9 +33,10 @@ When the dashboard is running with the server, you can collect new receipts with
 4. Copy that result &mdash; surrounding quotes or backslashes are fine &mdash; paste it back into the dashboard's text box and click **Sync now**.
 
 The server fetches your full receipt history, merges + dedupes it into the stored dataset, and refreshes the dashboard. Notes:
-- Your tokens are sent only to your own server, used for a single request, and are **never logged or stored**.
-- Tokens expire (the `idToken` lasts only a few minutes), so re-run the snippet to grab fresh ones whenever a sync reports an expired-token error.
-- If the result is `{"idToken":null,"clientID":null}`, you aren't logged in on that tab &mdash; sign in at costco.com and run it again.
+- The snippet also includes your costco.com session cookies so Costco's bot protection treats the server request like your browser's. They are sent only to your own server, used for a single request, and are **never logged or stored**.
+- Tokens expire (the `idToken` lasts only a few minutes), so re-run the snippet and sync right away. If you get an "expired" (401) error, grab fresh tokens.
+- If you get a 403 "blocked" error, Costco's bot protection rejected the server call (some required cookies are not readable from the page). Re-run and sync immediately; if it persists, fall back to the file download method (Option B above), which always works because it runs in your browser.
+- If the result is `{"idToken":null,"clientID":null,...}`, you aren't logged in on that tab &mdash; sign in at costco.com and run it again.
 - If you expose the dashboard beyond `localhost`, serve it over HTTPS so the tokens aren't sent in the clear.
 
 ## Persistent storage (optional server)

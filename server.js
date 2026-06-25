@@ -248,8 +248,11 @@ const RECEIPTS_GRAPHQL_QUERY = `
   }`.replace(/\s+/g, " ");
 
 // Fetch the full receipt history from Costco using member-supplied tokens.
-// Tokens are used only for this request and are never logged or persisted.
-async function fetchReceiptsFromCostco(idToken, clientID) {
+// Tokens and cookies are used only for this request and are never logged or
+// persisted. Browser-like headers and the member's session cookies are
+// included so Costco's edge (Akamai bot protection) treats the server request
+// the same way it treats the browser console call the snippet replaces.
+async function fetchReceiptsFromCostco(idToken, clientID, cookie) {
   const endDate = new Date();
   const endDateStr = endDate.toLocaleDateString("en-US", {
     year: "numeric",
@@ -262,18 +265,28 @@ async function fetchReceiptsFromCostco(idToken, clientID) {
     variables: { startDate: "01/01/2000", endDate: endDateStr },
   };
 
+  const headers = {
+    "Content-Type": "application/json-patch+json",
+    Accept: "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "User-Agent":
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+      "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    Origin: "https://www.costco.com",
+    Referer: "https://www.costco.com/OrderStatusCmd",
+    "Costco.Env": "ecom",
+    "Costco.Service": "restOrders",
+    "Costco-X-Wcs-Clientid": clientID,
+    "Client-Identifier": COSTCO_CLIENT_IDENTIFIER,
+    "Costco-X-Authorization": "Bearer " + idToken,
+  };
+  if (cookie) headers.Cookie = cookie;
+
   let response;
   try {
     response = await fetch(COSTCO_GRAPHQL_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json-patch+json",
-        "Costco.Env": "ecom",
-        "Costco.Service": "restOrders",
-        "Costco-X-Wcs-Clientid": clientID,
-        "Client-Identifier": COSTCO_CLIENT_IDENTIFIER,
-        "Costco-X-Authorization": "Bearer " + idToken,
-      },
+      headers,
       body: JSON.stringify(body),
     });
   } catch (err) {
@@ -284,16 +297,34 @@ async function fetchReceiptsFromCostco(idToken, clientID) {
     throw e;
   }
 
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 401) {
     const e = new Error(
-      "Costco rejected the tokens (likely expired). Grab fresh tokens from " +
-        "costco.com and try again."
+      "Costco rejected the tokens (likely expired). The idToken only lasts a " +
+        "few minutes — grab fresh tokens from costco.com and try again right away."
     );
     e.statusCode = 401;
     throw e;
   }
 
+  if (response.status === 403) {
+    const snippet = await safeBodySnippet(response);
+    console.error("Costco sync blocked (403). Response start:", snippet);
+    const e = new Error(
+      "Costco blocked the request (403). This is usually bot protection on " +
+        "server-side calls. Re-run the snippet (it now includes your session " +
+        "cookies) and sync again immediately; if it persists, use the file " +
+        "download method instead."
+    );
+    e.statusCode = 403;
+    throw e;
+  }
+
   if (!response.ok) {
+    const snippet = await safeBodySnippet(response);
+    console.error(
+      `Costco sync unexpected status ${response.status}. Response start:`,
+      snippet
+    );
     const e = new Error(`Costco returned an unexpected status (${response.status}).`);
     e.statusCode = 502;
     throw e;
@@ -318,6 +349,17 @@ async function fetchReceiptsFromCostco(idToken, clientID) {
   return [];
 }
 
+// Read the first chunk of a response body for diagnostics without throwing.
+// Never includes request tokens/cookies — only Costco's own response.
+async function safeBodySnippet(response) {
+  try {
+    const text = await response.text();
+    return (text || "").slice(0, 300);
+  } catch (err) {
+    return "(could not read response body)";
+  }
+}
+
 // --- API routes ------------------------------------------------------------
 
 app.get("/api/receipts", (req, res) => {
@@ -336,7 +378,7 @@ app.post("/api/receipts", (req, res) => {
 });
 
 app.post("/api/sync", async (req, res) => {
-  const { idToken, clientID } = req.body || {};
+  const { idToken, clientID, cookie } = req.body || {};
   if (!idToken || !clientID) {
     return res.status(400).json({
       error:
@@ -346,7 +388,7 @@ app.post("/api/sync", async (req, res) => {
   }
 
   try {
-    const fetched = await fetchReceiptsFromCostco(idToken, clientID);
+    const fetched = await fetchReceiptsFromCostco(idToken, clientID, cookie);
     const result = mergeReceipts(fetched);
     res.json({ ...result, fetched: fetched.length });
   } catch (err) {
