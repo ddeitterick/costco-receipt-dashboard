@@ -97,6 +97,129 @@
     .status.error {
       color: var(--danger);
     }
+
+    .sync-panel {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-soft);
+      padding: 16px 20px;
+      margin-bottom: 20px;
+    }
+
+    .sync-panel > summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 1rem;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .sync-panel > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .sync-panel > summary::before {
+      content: "▸";
+      color: var(--accent);
+      transition: transform 0.15s ease;
+    }
+
+    .sync-panel[open] > summary::before {
+      transform: rotate(90deg);
+    }
+
+    .sync-body {
+      margin-top: 14px;
+      font-size: 0.9rem;
+      color: var(--text-main);
+    }
+
+    .sync-body ol {
+      margin: 0 0 14px;
+      padding-left: 20px;
+      line-height: 1.6;
+      color: var(--text-muted);
+    }
+
+    .sync-snippet {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+      margin-bottom: 14px;
+    }
+
+    .sync-snippet code {
+      flex: 1;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      user-select: all;
+    }
+
+    .sync-panel textarea {
+      width: 100%;
+      min-height: 70px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.82rem;
+      resize: vertical;
+    }
+
+    .sync-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+
+    .sync-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 9px 18px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .sync-btn:hover:not(:disabled) {
+      background: #1d4ed8;
+    }
+
+    .sync-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .sync-btn.secondary {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .sync-msg {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .sync-msg.error {
+      color: var(--danger);
+    }
+
+    .sync-msg.success {
+      color: var(--success);
+    }
  
     .summary-grid {
       display: grid;
@@ -291,7 +414,36 @@
         <div class="status" style="visibility: hidden;">placeholder</div>
       </div>
     </header>
- 
+
+    <!-- Sync directly from Costco -->
+    <details class="sync-panel" id="syncPanel">
+      <summary>Sync new receipts from Costco</summary>
+      <div class="sync-body">
+        <ol>
+          <li>
+            In another tab, log in at
+            <a href="https://www.costco.com/OrderStatusCmd" target="_blank" rel="noopener">costco.com</a>
+            and open the browser developer console (F12 &rarr; Console).
+          </li>
+          <li>Paste the snippet below and press Enter. It copies your login tokens to the clipboard.</li>
+          <li>Come back here, paste into the box, and click <strong>Sync now</strong>.</li>
+        </ol>
+        <div class="sync-snippet">
+          <code id="syncSnippet">copy(JSON.stringify({idToken:localStorage.getItem('idToken'),clientID:localStorage.getItem('clientID')}))</code>
+          <button type="button" class="sync-btn secondary" id="copySnippetBtn">Copy snippet</button>
+        </div>
+        <textarea
+          id="syncTokenInput"
+          placeholder='Paste the copied tokens here, e.g. {"idToken":"...","clientID":"..."}'
+          spellcheck="false"
+        ></textarea>
+        <div class="sync-actions">
+          <button type="button" class="sync-btn" id="syncBtn">Sync now</button>
+          <span class="sync-msg" id="syncMsg">Your tokens are sent to your own server only, used once, and never stored.</span>
+        </div>
+      </div>
+    </details>
+
     <!-- Summary cards -->
     <section class="summary-grid">
       <div class="summary-card">
@@ -2293,6 +2445,103 @@
         console.info("No server storage available; upload a file to begin.");
       }
     }
+
+    // --- Sync directly from Costco ------------------------------------------
+
+    // Copy the token-grabbing snippet to the clipboard.
+    document
+      .getElementById("copySnippetBtn")
+      .addEventListener("click", async (e) => {
+        const snippet = document.getElementById("syncSnippet").textContent;
+        const btn = e.currentTarget;
+        try {
+          await navigator.clipboard.writeText(snippet);
+          const original = btn.textContent;
+          btn.textContent = "Copied!";
+          setTimeout(() => (btn.textContent = original), 1500);
+        } catch (err) {
+          const sel = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(document.getElementById("syncSnippet"));
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      });
+
+    // Pull tokens out of the pasted text. Accepts the JSON blob produced by the
+    // helper snippet, or a bare object with idToken / clientID.
+    function parseSyncTokens(raw) {
+      const text = (raw || "").trim();
+      if (!text) throw new Error("Paste your copied tokens first.");
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch (err) {
+        throw new Error("That doesn't look like the copied tokens. Re-run the snippet and paste again.");
+      }
+      const idToken = parsed && parsed.idToken;
+      const clientID = parsed && parsed.clientID;
+      if (!idToken || !clientID) {
+        throw new Error("The pasted tokens are missing idToken or clientID. Make sure you're logged in at costco.com.");
+      }
+      return { idToken, clientID };
+    }
+
+    document.getElementById("syncBtn").addEventListener("click", async () => {
+      const btn = document.getElementById("syncBtn");
+      const msgEl = document.getElementById("syncMsg");
+      const inputEl = document.getElementById("syncTokenInput");
+
+      const setMsg = (text, kind) => {
+        msgEl.textContent = text;
+        msgEl.className = "sync-msg" + (kind ? " " + kind : "");
+      };
+
+      let tokens;
+      try {
+        tokens = parseSyncTokens(inputEl.value);
+      } catch (err) {
+        setMsg(err.message, "error");
+        return;
+      }
+
+      btn.disabled = true;
+      const originalLabel = btn.textContent;
+      btn.textContent = "Syncing…";
+      setMsg("Fetching your receipts from Costco…", null);
+
+      try {
+        const res = await fetch("/api/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(tokens),
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          throw new Error(data.error || `Sync failed (status ${res.status}).`);
+        }
+
+        accumulatedReceipts = data.receipts || [];
+        renderAccumulatedReceipts();
+
+        const added = data.added || 0;
+        const upgraded = data.upgraded || 0;
+        const fetched = data.fetched || 0;
+        let summary = `Fetched ${fetched.toLocaleString()} receipts — added ${added.toLocaleString()} new`;
+        if (upgraded > 0) summary += `, upgraded ${upgraded.toLocaleString()}`;
+        summary += `. ${(data.total || accumulatedReceipts.length).toLocaleString()} total stored.`;
+        setMsg(summary, "success");
+
+        // Clear the tokens from the field once they've been used.
+        inputEl.value = "";
+      } catch (err) {
+        setMsg(err.message || "Sync failed.", "error");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
+    });
 
     loadStoredReceipts();
   </script>

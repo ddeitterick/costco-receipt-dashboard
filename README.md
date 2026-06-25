@@ -5,6 +5,7 @@ A small, single-file browser dashboard to analyze Costco receipt JSON exports. D
 <img alt="image" src="https://github.com/user-attachments/assets/4532bdfa-8204-42d5-9d3d-ec09b4b82af4" />
 
 ## Features
+- **Sync from Costco** (server mode): pull new receipts straight into the dashboard with a button — no file download/upload round-trip (see below).
 - Upload / analyze a JSON array of Costco receipts (no server required).
 - Summary cards for totals (spend, receipts, unique items/warehouses, gas, discounts, returns).
 - Top tables and charts: most-spent items, most-purchased items, biggest price increases, per-warehouse spend, refunds, gasoline breakdown, and top discounted products.
@@ -20,7 +21,21 @@ A small, single-file browser dashboard to analyze Costco receipt JSON exports. D
 3. Option B — Upload receipts JSON file(s) using the `Receipts JSON` file input near the top of the dashboard:
 	- You can upload multiple files at once (useful for household receipts from multiple members).
 	- The dashboard automatically deduplicates receipts to prevent double-counting if you upload the same file multiple times.
-4. The page will parse the file(s), show a status line with the total number of receipts and the date range, and populate all cards/tables.
+4. Option C — Use the **Sync new receipts from Costco** panel to fetch directly (requires the server, see below).
+5. The page will parse the data, show a status line with the total number of receipts and the date range, and populate all cards/tables.
+
+## Sync from Costco (one-click collection)
+When the dashboard is running with the server, you can collect new receipts without downloading and re-uploading a file. Because your Costco login lives only in the costco.com browser session, you supply those login tokens once and the server makes the request for you.
+
+1. Open the **Sync new receipts from Costco** panel near the top of the dashboard.
+2. In another tab, log in at https://www.costco.com/OrderStatusCmd and open the browser console (F12 → Console).
+3. Click **Copy snippet** in the panel, paste it into the console, and press Enter. The snippet copies your `idToken` and `clientID` to the clipboard.
+4. Paste that back into the dashboard's text box and click **Sync now**.
+
+The server fetches your full receipt history, merges + dedupes it into the stored dataset, and refreshes the dashboard. Notes:
+- Your tokens are sent only to your own server, used for a single request, and are **never logged or stored**.
+- Tokens expire, so re-run the snippet to grab fresh ones whenever a sync reports an expired-token error.
+- If you expose the dashboard beyond `localhost`, serve it over HTTPS so the tokens aren't sent in the clear.
 
 ## Persistent storage (optional server)
 By default the dashboard runs entirely in the browser and forgets your data on refresh. To save uploaded receipts so they are reloaded automatically on every page load, run the included Node.js server. Uploaded files are merged and deduplicated into a single dataset stored on disk (`data/receipts.json`).
@@ -42,6 +57,7 @@ Environment variables:
 API endpoints (used by the dashboard, but available for scripting):
 - `GET /api/receipts` — return the stored receipts (`{ "receipts": [...] }`).
 - `POST /api/receipts` — body is an array of receipts; merges + dedupes + persists.
+- `POST /api/sync` — body is `{ "idToken": "...", "clientID": "..." }`; fetches receipts from Costco, merges + dedupes + persists, and returns `{ receipts, added, duplicates, upgraded, total, fetched }`.
 - `DELETE /api/receipts` — clears all stored receipts.
 
 ### Run with Docker
