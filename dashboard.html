@@ -429,7 +429,7 @@
           <li>Come back here, paste into the box, and click <strong>Sync now</strong>.</li>
         </ol>
         <div class="sync-snippet">
-          <code id="syncSnippet">(function(){var i=localStorage.getItem('idToken'),c=localStorage.getItem('clientID');if(!i||!c){console.warn('Costco tokens not found \u2014 make sure you are logged in at costco.com.');}var t=JSON.stringify({idToken:i,clientID:c});console.log(t);try{copy(t)}catch(e){}return t;})()</code>
+          <code id="syncSnippet">(function(){var i=localStorage.getItem('idToken'),c=localStorage.getItem('clientID');if(!i||!c){console.warn('Costco tokens not found \u2014 make sure you are logged in at costco.com.');}var t=JSON.stringify({idToken:i,clientID:c});console.log(t);try{copy(t)}catch(e){}})()</code>
           <button type="button" class="sync-btn secondary" id="copySnippetBtn">Copy snippet</button>
         </div>
         <textarea
@@ -2469,18 +2469,44 @@
       });
 
     // Pull tokens out of the pasted text. Accepts the JSON blob produced by the
-    // helper snippet, or a bare object with idToken / clientID.
+    // helper snippet, or a bare object with idToken / clientID. Tolerates the
+    // way some consoles (notably Safari) echo a returned value: a quoted,
+    // backslash-escaped string with a trailing " = $1" assignment hint.
     function parseSyncTokens(raw) {
-      const text = (raw || "").trim();
+      let text = (raw || "").trim();
       if (!text) throw new Error("Paste your copied tokens first.");
-      let parsed;
-      try {
-        parsed = JSON.parse(text);
-      } catch (err) {
+
+      // Drop a trailing console assignment hint like ` = $1` (Safari).
+      text = text.replace(/\s*=\s*\$\d+\s*$/, "").trim();
+
+      const tryParse = (s) => {
+        try {
+          return JSON.parse(s);
+        } catch (e) {
+          return undefined;
+        }
+      };
+
+      let parsed = tryParse(text);
+      // Safari may copy the value double-encoded as a quoted string with
+      // escaped quotes; parsing once yields the inner JSON string, so parse
+      // again to reach the object.
+      if (typeof parsed === "string") parsed = tryParse(parsed);
+
+      // Last resort: isolate the first {...} block and try (un)escaping it.
+      if (!parsed || typeof parsed !== "object") {
+        const match = text.match(/\{[\s\S]*\}/);
+        if (match) {
+          parsed = tryParse(match[0]) || tryParse(match[0].replace(/\\"/g, '"'));
+        }
+      }
+
+      if (!parsed || typeof parsed !== "object") {
         throw new Error("That doesn't look like the copied tokens. Re-run the snippet and paste again.");
       }
-      const idToken = parsed && parsed.idToken;
-      const clientID = parsed && parsed.clientID;
+
+      const idToken = parsed.idToken;
+      const clientID = parsed.clientID;
       if (!idToken || !clientID) {
         throw new Error("The pasted tokens are missing idToken or clientID. Make sure you're logged in at costco.com.");
       }
