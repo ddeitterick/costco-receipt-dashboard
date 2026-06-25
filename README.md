@@ -29,12 +29,13 @@ When the dashboard is running with the server, you can collect new receipts with
 
 1. Open the **Sync new receipts from Costco** panel near the top of the dashboard.
 2. In another tab, log in at https://www.costco.com/OrderStatusCmd and open the browser console (F12 → Console).
-3. Click **Copy snippet** in the panel, paste it into the console, and press Enter. The snippet copies your `idToken` and `clientID` to the clipboard.
-4. Paste that back into the dashboard's text box and click **Sync now**.
+3. Click **Copy snippet** in the panel, paste it into the console, and press Enter. The snippet prints your `idToken` and `clientID` as a single JSON line (and copies them to the clipboard in browsers that support the console `copy()` helper). If either token is missing it logs a warning telling you to log in first.
+4. Copy that JSON line (or paste from your clipboard) back into the dashboard's text box and click **Sync now**.
 
 The server fetches your full receipt history, merges + dedupes it into the stored dataset, and refreshes the dashboard. Notes:
 - Your tokens are sent only to your own server, used for a single request, and are **never logged or stored**.
 - Tokens expire, so re-run the snippet to grab fresh ones whenever a sync reports an expired-token error.
+- In Safari, the console `copy()` helper may not place the value on the clipboard; just select and copy the JSON line the snippet prints.
 - If you expose the dashboard beyond `localhost`, serve it over HTTPS so the tokens aren't sent in the clear.
 
 ## Persistent storage (optional server)
